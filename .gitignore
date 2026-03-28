@@ -1,0 +1,50 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Variables de entorno
+.env
+.env.local
+!.env.example
+
+# Caché de Python y archivos compilados
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Construcción y empaquetado
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Cachés de tests y tipado
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Secretos locales de Streamlit
+.streamlit/secrets.toml
+
+# Artefactos de editor y sistema operativo
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Registros
+*.log
+
+# Artefactos de datos: conservar solo .gitkeep
+data/**/*
+!data/**/
+!data/**/.gitkeep
