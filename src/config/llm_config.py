@@ -58,7 +58,7 @@ def _read_float_env(variable_name: str, default_value: float) -> float:
 def load_ollama_settings() -> OllamaSettings:
     """Carga y valida la configuración relacionada con Ollama desde el entorno."""
     base_url = _read_required_env("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-    model = _read_required_env("OLLAMA_MODEL", "llama3.1:8b")
+    model = _read_required_env("OLLAMA_MODEL", "llama3.1")
     temperature = _read_float_env("OLLAMA_TEMPERATURE", 0.2)
     request_timeout = _read_float_env("OLLAMA_REQUEST_TIMEOUT", 8.0)
 
