@@ -17,20 +17,17 @@
 
 1. El usuario escribe en st.chat_input(...).
 2. Se agrega un turno al historial en session_state con role user.
-3. La UI llama a generate_chat_response(history, system_prompt).
-4. El agente transforma cada turno en mensajes de LangChain:
-   - user -> HumanMessage
-   - assistant -> AIMessage
-   - system prompt -> SystemMessage (si existe)
-5. Se valida que el ultimo mensaje sea de usuario antes de inferir.
-6. Se solicita el cliente con get_chat_ollama().
-7. get_chat_ollama() realiza:
-   - lectura y validacion de OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TEMPERATURE, OLLAMA_REQUEST_TIMEOUT
-   - healthcheck a GET /api/tags
-   - creacion de ChatOllama
-8. Se ejecuta llm.invoke(messages).
-9. La respuesta se normaliza a string.
-10. La UI muestra el contenido y lo guarda en historial como role assistant.
+3. La UI calcula una ventana deslizante de historial reciente (CHAT_MAX_CONTEXT_TURNS).
+4. Los turnos que salen de la ventana se comprimen en un resumen incremental en session_state (chat_summary).
+5. Se compone el system prompt base + resumen comprimido.
+6. La UI llama a generate_chat_response(history_reciente, system_prompt_compuesto).
+7. El agente transforma cada turno recibido en mensajes de LangChain: user -> HumanMessage, assistant -> AIMessage y system prompt -> SystemMessage (si existe).
+8. Se valida que el ultimo mensaje sea de usuario antes de inferir.
+9. Se solicita el cliente con get_chat_ollama().
+10. get_chat_ollama() realiza lectura y validacion de OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TEMPERATURE, OLLAMA_REQUEST_TIMEOUT, healthcheck a GET /api/tags y creacion de ChatOllama.
+11. Se ejecuta llm.invoke(messages).
+12. La respuesta se normaliza a string.
+13. La UI muestra el contenido y lo guarda en historial como role assistant.
 
 ## Manejo de errores
 
@@ -41,4 +38,3 @@
 ## Nota sobre cache
 
 get_chat_ollama() esta cacheado con lru_cache(maxsize=1). Esto evita crear el cliente en cada turno y mejora estabilidad/performance.
-

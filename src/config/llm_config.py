@@ -92,10 +92,9 @@ def _check_ollama_connection(base_url: str, timeout: float) -> None:
             "y que OLLAMA_BASE_URL sea correcto."
         ) from exc
 
-
+# Cachea el cliente ChatOllama para evitar recrearlo en cada interacción, mejorando la eficiencia.
 @lru_cache(maxsize=1)
 def get_chat_ollama() -> ChatOllama:
-    """Crea y cachea un cliente ChatOllama con manejo robusto de errores."""
     settings = load_ollama_settings()
 
     try:

@@ -1,5 +1,11 @@
 """Puente mínimo de chat entre la UI de Streamlit y el cliente LLM local."""
 
+# Este módulo se centra exclusivamente en la lógica de transformación de mensajes 
+# y la interacción directa con el cliente LLM.
+# No debe contener lógica de UI ni detalles de configuración, que se manejan en otros módulos.
+# La función `generate_chat_response` es el punto de integración clave para futuras orquestaciones con LangGraph.
+
+
 from __future__ import annotations
 
 from typing import Literal, Sequence, TypedDict

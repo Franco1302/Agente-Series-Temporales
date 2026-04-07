@@ -56,6 +56,8 @@ Variables esperadas:
 - `OLLAMA_TEMPERATURE`: temperatura de generacion (`0.0` a `2.0`).
 - `OLLAMA_REQUEST_TIMEOUT`: timeout en segundos para chequeo de conexion.
 - `CHAT_SYSTEM_PROMPT`: prompt de sistema por defecto para el asistente.
+- `CHAT_MAX_CONTEXT_TURNS`: cantidad de turnos recientes enviados al LLM en cada inferencia.
+- `CHAT_SUMMARY_MAX_CHARS`: tamano maximo del resumen incremental de turnos antiguos.
 
 Ejemplo:
 
@@ -65,6 +67,8 @@ OLLAMA_MODEL=llama3.1:latest
 OLLAMA_TEMPERATURE=0.2
 OLLAMA_REQUEST_TIMEOUT=8
 CHAT_SYSTEM_PROMPT=Eres un asistente de IA util especializado en analisis de data drift.
+CHAT_MAX_CONTEXT_TURNS=8
+CHAT_SUMMARY_MAX_CHARS=1400
 ```
 
 ## Iniciar la app paso a paso
@@ -106,7 +110,6 @@ Para mantener este README mas conciso, el detalle operativo se mueve a la carpet
 
 Cada error nuevo que aparezca durante desarrollo debe registrarse en Docs/errores_y_soluciones.md.
 
-
 ## Estructura del repositorio
 
 ```text
@@ -128,4 +131,3 @@ TFG/
 └── ui/
    └── app.py
 ```
-
