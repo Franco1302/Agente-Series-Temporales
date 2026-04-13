@@ -63,7 +63,7 @@ def _extract_markdown(pdf_path: Path) -> str:
 
 
 def _split_markdown(markdown_text: str, source_name: str) -> list[Document]:
-    """Realiza split semantico por encabezados y split recursivo por tamano."""
+    """Realiza split semantico por encabezados y split recursivo por tamaño."""
     print("Aplicando corte semantico por encabezados Markdown...")
     headers_to_split_on = [
         ("#", "header_1"),

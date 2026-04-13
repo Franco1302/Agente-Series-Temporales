@@ -1,28 +1,44 @@
-# Orquestador IA para Data Drift (Fase 1)
+# Orquestador IA para Data Drift
 
-Base escalable para un futuro sistema IA con orquestador, RAG y API. En esta fase se entrega un chat local en Streamlit conectado a Ollama.
+Estado actual (abril 2026):
 
-## Que incluye esta fase
+- Chat local en Streamlit conectado a Ollama.
+- Implementacion RAG local disponible en backend (ingesta, retriever y tool).
+- Integracion directa entre la UI y el flujo RAG aun pendiente.
 
-- Estructura modular y limpia del repositorio.
-- Interfaz de chat en Streamlit.
-- Puente de chat desacoplado para invocacion de LLM local.
-- Capa de configuracion de entorno para Ollama.
-- Base lista para evolucionar a LangGraph y RAG.
+## Alcance implementado
+
+### Chat UI
+
+- Interfaz en Streamlit con historial conversacional.
+- Ventana de contexto reciente + resumen incremental en sesion.
+- Invocacion al LLM local por medio de un puente desacoplado.
+
+### RAG backend
+
+- Ingesta de PDF tecnico a base vectorial Chroma local.
+- Segmentacion semantica por encabezados Markdown y chunking con overlap.
+- Recuperacion por similitud con embeddings en Ollama (nomic-embed-text).
+- Re-ranking lexico local para priorizar fragmentos relevantes.
+- Sintesis final con LLM y salida con bloque de fuentes.
+- Script de chequeo basico de calidad para consultas de referencia.
 
 ## Arquitectura actual
 
-- `ui/`: interfaz de usuario en Streamlit.
-- `src/agent/`: logica del chat y transformacion de historial.
-- `src/config/`: carga y validacion de variables de entorno, cliente Ollama.
-- `data/`: carpetas reservadas para conocimiento y uploads temporales.
+- ui/: interfaz de usuario en Streamlit.
+- src/agent/: logica del chat y transformacion de historial.
+- src/config/: carga y validacion de variables de entorno, cliente Ollama.
+- src/rag_engine/: ingesta, retriever y validacion de calidad RAG.
+- src/tools/: herramienta consultar_teoria_drift para retrieval + sintesis.
+- data/: conocimiento fuente, uploads temporales y persistencia vectorial.
 
 ## Requisitos previos
 
 - Python 3.10 o superior.
-- Entorno virtual (`.venv`) creado.
-- Ollama instalado.
-- Modelo descargado en Ollama.
+- Entorno virtual (.venv) creado.
+- Ollama instalado y en ejecucion.
+- Modelo de chat descargado en Ollama.
+- Modelo de embeddings disponible en Ollama: nomic-embed-text.
 
 Comprobacion rapida:
 
@@ -33,7 +49,7 @@ ollama --version
 
 ## Configuracion inicial
 
-Ejecuta estos comandos desde la raiz del proyecto (`TFG/`):
+Ejecuta estos comandos desde la raiz del proyecto (TFG/):
 
 ```bash
 # 1) Activar entorno virtual
@@ -49,37 +65,64 @@ cp .env.example .env
 
 ## Configurar .env
 
-Variables esperadas:
+Variables usadas por chat:
 
-- `OLLAMA_BASE_URL`: URL de Ollama local. Valor recomendado: `http://localhost:11434`
-- `OLLAMA_MODEL`: nombre exacto del modelo instalado en Ollama. Recomendado: `llama3.1:latest`
-- `OLLAMA_TEMPERATURE`: temperatura de generacion (`0.0` a `2.0`).
-- `OLLAMA_REQUEST_TIMEOUT`: timeout en segundos para chequeo de conexion.
-- `CHAT_SYSTEM_PROMPT`: prompt de sistema por defecto para el asistente.
-- `CHAT_MAX_CONTEXT_TURNS`: cantidad de turnos recientes enviados al LLM en cada inferencia.
-- `CHAT_SUMMARY_MAX_CHARS`: tamano maximo del resumen incremental de turnos antiguos.
+- OLLAMA_BASE_URL: URL de Ollama local. Recomendado: <http://localhost:11434>
+- OLLAMA_MODEL: nombre exacto del modelo de chat instalado en Ollama.
+- OLLAMA_TEMPERATURE: temperatura de generacion (0.0 a 2.0).
+- OLLAMA_REQUEST_TIMEOUT: timeout en segundos para chequeo de conexion.
+- CHAT_SYSTEM_PROMPT: prompt de sistema por defecto para el asistente.
+- CHAT_MAX_CONTEXT_TURNS: cantidad de turnos recientes enviados al LLM en cada inferencia.
+- CHAT_SUMMARY_MAX_CHARS: tamano maximo del resumen incremental de turnos antiguos.
 
-Ejemplo:
+Variables usadas por RAG:
 
-```env
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.1:latest
-OLLAMA_TEMPERATURE=0.2
-OLLAMA_REQUEST_TIMEOUT=8
-CHAT_SYSTEM_PROMPT=Eres un asistente de IA util especializado en analisis de data drift.
-CHAT_MAX_CONTEXT_TURNS=8
-CHAT_SUMMARY_MAX_CHARS=1400
+- RAG_TOP_K: cantidad inicial de documentos recuperados por similitud.
+- RAG_KEEP_TOP: cantidad final de documentos tras re-ranking lexico.
+
+Variables presentes en .env.example y no usadas en el flujo actual:
+
+- RAG_SUMMARY_MAX_SENTENCES
+- RAG_SUMMARY_MAX_CHARS
+
+## Flujo operativo RAG (backend)
+
+### 1) Construir base vectorial
+
+```bash
+cd /ruta/a/TFG
+source .venv/bin/activate
+PYTHONPATH=. python src/rag_engine/ingest.py
 ```
 
-## Iniciar la app paso a paso
+Resultado esperado:
 
-Usa dos terminales para evitar confusiones.
+- Se procesa el PDF tecnico en data/knowledge_base.
+- Se persisten embeddings y metadatos en data/vector_db.
+
+### 2) Ejecutar chequeo basico de calidad
+
+```bash
+cd /ruta/a/TFG
+source .venv/bin/activate
+PYTHONPATH=. python src/rag_engine/rag_quality_check.py
+```
+
+Resultado esperado:
+
+- Pruebas PASS/WARN por caso de consulta.
+- Resumen final con numero de fallos.
+
+## Iniciar la app de chat
+
+Usa dos terminales.
 
 ### Terminal A: Ollama
 
 ```bash
 # Si el modelo no existe aun
-ollama pull llama3.1:latest
+ollama pull llama3.1:8b
+ollama pull nomic-embed-text
 
 # Levantar servicio local
 ollama serve
@@ -90,44 +133,45 @@ ollama serve
 ```bash
 cd /ruta/a/TFG
 source .venv/bin/activate
-
-# Importante: incluir la raiz del proyecto en PYTHONPATH
 PYTHONPATH=. streamlit run ui/app.py
 ```
 
-Al arrancar, Streamlit mostrara una URL local, normalmente:
+Nota importante: la UI actual usa el flujo de chat directo y no invoca todavia la tool RAG.
 
-```text
-http://localhost:8501
-```
+## Documentacion
 
-## Documentacion en Docs
+- Flujo de app y flujo RAG: [docs/flujo_app.md](docs/flujo_app.md)
+- Implementacion RAG (detalle tecnico): [docs/implementacion_rag.md](docs/implementacion_rag.md)
+- Registro de errores y soluciones: [docs/errores_y_soluciones.md](docs/errores_y_soluciones.md)
 
-Para mantener este README mas conciso, el detalle operativo se mueve a la carpeta Docs:
-
-- Flujo detallado de la app: [Docs/flujo_app.md](Docs/flujo_app.md)
-- Registro de errores y soluciones: [Docs/errores_y_soluciones.md](Docs/errores_y_soluciones.md)
-
-Cada error nuevo que aparezca durante desarrollo debe registrarse en Docs/errores_y_soluciones.md.
+Cada error nuevo detectado en desarrollo debe registrarse en docs/errores_y_soluciones.md.
 
 ## Estructura del repositorio
 
 ```text
 TFG/
-├── Docs/
+├── docs/
 │   ├── errores_y_soluciones.md
-│   └── flujo_app.md
+│   ├── flujo_app.md
+│   └── implementacion_rag.md
 ├── .env.example
 ├── README.md
 ├── requirements.txt
 ├── data/
 │   ├── knowledge_base/
-│   └── temp_uploads/
+│   ├── temp_uploads/
+│   └── vector_db/
 ├── src/
 │   ├── agent/
 │   │   └── simple_chat.py
-│   └── config/
-│       └── llm_config.py
+│   ├── config/
+│   │   └── llm_config.py
+│   ├── rag_engine/
+│   │   ├── ingest.py
+│   │   ├── rag_quality_check.py
+│   │   └── retriever.py
+│   └── tools/
+│       └── rag_tool.py
 └── ui/
    └── app.py
 ```
