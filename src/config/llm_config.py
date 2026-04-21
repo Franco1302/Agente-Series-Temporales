@@ -108,3 +108,23 @@ def get_chat_ollama() -> ChatOllama:
         raise RuntimeError(
             "No se pudo inicializar ChatOllama. Revisa el servicio de Ollama y los valores de .env."
         ) from exc
+
+
+def get_llm_with_tools(tools: list) -> ChatOllama:
+    """Devuelve un ChatOllama con las herramientas enlazadas para Tool Calling.
+
+    A diferencia de `get_chat_ollama`, esta función no se cachea porque la lista
+    de herramientas puede variar entre llamadas. El cliente base sí se reutiliza
+    del caché existente, por lo que no se vuelve a verificar la conexión.
+
+    Args:
+        tools: Lista de herramientas LangChain decoradas con @tool.
+
+    Returns:
+        ChatOllama con `.bind_tools(tools)` aplicado, listo para usar en nodos LangGraph.
+
+    Raises:
+        RuntimeError: Si no se puede inicializar el cliente base de Ollama.
+    """
+    base_llm = get_chat_ollama()
+    return base_llm.bind_tools(tools)
