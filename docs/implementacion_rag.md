@@ -1,15 +1,16 @@
 # Implementacion RAG local
 
 
-## Estado actual
+## Estado actual (2026-04-21)
 
 - Implementado:
   - Ingesta de conocimiento desde PDF a base vectorial local.
   - Retriever sobre Chroma en modo lectura.
-  - Tool de consulta con retrieval + re-ranking + sintesis + fuentes.
-  - Script de chequeo basico de calidad.
+  - Tool de consulta con retrieval + re-ranking + síntesis + fuentes.
+  - Script de chequeo básico de calidad.
 - Pendiente:
-  - Integrar la tool RAG en el flujo de la UI Streamlit.
+  - Integrar `consultar_teoria_drift` como herramienta del agente LangGraph.
+  - Poblar `AgentState.rag_context` con fragmentos relevantes antes de `reasoning_node`.
 
 ## Modulos y responsabilidades
 
@@ -128,13 +129,12 @@ Resultado esperado:
 - Import path al ejecutar scripts:
   - Ejecutar desde raiz del proyecto con PYTHONPATH=.
 
-## Integracion pendiente con la UI
+## Integración pendiente con el agente LangGraph
 
-Actualmente ui/app.py llama generate_chat_response(...) y no consulta consultar_teoria_drift(...).
+`ui/app.py` ya usa el agente LangGraph. El siguiente paso es conectar el RAG al grafo:
 
-Para completar integracion en la interfaz se requiere:
-
-1. Decidir politica de activacion RAG (siempre activo, modo con selector o por clasificacion de intencion).
-2. Definir formato de respuesta en chat para mostrar fuentes de forma legible.
-3. Implementar llamada a la tool desde el flujo principal de Streamlit.
-4. Probar latencia, calidad y manejo de errores en la experiencia conversacional.
+1. Añadir `consultar_teoria_drift` a `AGENT_TOOLS` en `src/agent/tools/__init__.py`.
+2. Añadir sus parámetros a `TOOL_REQUIRED_PARAMS` en `src/agent/nodes/param_validation.py`.
+3. Decidir si el contexto RAG se inyecta proactivamente (pre-retrieval en un nodo anterior a `reasoning_node`) o reactivamente (el LLM invoca la tool cuando la necesita).
+4. Definir formato de respuesta en chat para mostrar fuentes de forma legible.
+5. Probar latencia, calidad y manejo de errores en la experiencia conversacional.

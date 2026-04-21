@@ -1,79 +1,144 @@
-# Flujo detallado de ejecucion (chat + RAG)
+# Flujo detallado de la aplicación
 
-## Estado actual de integracion
+## Estado actual de integración (2026-04-21)
 
-- La interfaz en Streamlit funciona en modo chat directo con Ollama.
-- El backend RAG esta implementado y operativo por scripts/herramientas.
-- La UI todavia no invoca de forma directa la herramienta RAG.
+| Componente | Estado |
+|---|---|
+| Chat directo con Ollama (`simple_chat.py`) | Operativo — marcado como obsoleto, mantenido como referencia |
+| Agente LangGraph con Tool Calling | **Implementado y activo** |
+| RAG con base vectorial Chroma | Implementado, no integrado aún en el grafo del agente |
+| Servidor MCP real | Pendiente (iteración futura) |
+| API real de series temporales | Pendiente (iteración futura) |
+
+---
 
 ## Componentes involucrados
 
-- ui/app.py: interfaz de chat y ciclo de interaccion en Streamlit.
-- src/agent/simple_chat.py: puente entre historial de chat y mensajes del LLM.
-- src/config/llm_config.py: carga de .env, validacion de parametros y cliente ChatOllama.
-- src/rag_engine/ingest.py: pipeline de ingesta PDF -> Markdown -> chunks -> embeddings -> Chroma.
-- src/rag_engine/retriever.py: construccion de retriever local en modo lectura sobre Chroma.
-- src/tools/rag_tool.py: consulta RAG con retrieval, re-ranking, sintesis y fuentes.
-- src/rag_engine/rag_quality_check.py: pruebas basicas de calidad para retrieval + sintesis.
+### Capa de interfaz
+- `ui/app.py` — Streamlit: renderizado, file uploader, streaming de pasos del agente.
 
-## Flujo de arranque de la app (chat)
+### Capa de agente
+- `src/agent/graph.py` — construcción y compilación del grafo LangGraph con MemorySaver.
+- `src/agent/state.py` — `AgentState` TypedDict: estado compartido entre nodos.
+- `src/agent/nodes/reasoning.py` — nodo de razonamiento: invoca el LLM con tools enlazadas.
+- `src/agent/nodes/tool_execution.py` — nodo de ejecución: lanza `ToolNode` de LangGraph.
+- `src/agent/nodes/param_validation.py` — nodo de validación: detecta parámetros faltantes.
+- `src/agent/nodes/routing.py` — funciones de enrutamiento condicional entre nodos.
+- `src/agent/prompts/system_prompts.py` — `build_system_prompt()`: prompt parametrizado por contexto.
+- `src/agent/tools/` — herramientas mock de las tres operaciones de la API futura.
 
-1. Se ejecuta Streamlit con el target ui/app.py.
-2. Se importan generate_chat_response y load_ollama_settings.
-3. Al importar llm_config.py se intenta cargar .env desde la raiz del proyecto.
-4. Se construye la pagina y el sidebar con parametros activos de Ollama y memoria conversacional.
+### Capa de configuración
+- `src/config/llm_config.py` — cliente ChatOllama cacheado + `get_llm_with_tools()`.
 
-## Flujo por mensaje en la UI (chat directo)
+### Capa RAG (implementada, pendiente de integración en el grafo)
+- `src/rag_engine/ingest.py`, `src/rag_engine/retriever.py`, `src/tools/rag_tool.py`.
 
-1. El usuario escribe en st.chat_input(...).
-2. Se agrega el turno user al historial en session_state.
-3. La UI calcula ventana deslizante de historial reciente (CHAT_MAX_CONTEXT_TURNS).
-4. Los turnos antiguos salen de la ventana y se compactan en chat_summary.
-5. Se compone el prompt de sistema base + resumen comprimido.
-6. La UI llama a generate_chat_response(history_reciente, prompt_compuesto).
-7. simple_chat transforma turnos a mensajes LangChain (HumanMessage/AIMessage/SystemMessage).
-8. Se valida que el ultimo mensaje sea del usuario.
-9. Se obtiene cliente con get_chat_ollama().
-10. get_chat_ollama() valida entorno, conecta con Ollama (/api/tags) y crea ChatOllama.
-11. Se ejecuta llm.invoke(messages).
-12. La respuesta se normaliza a texto y se guarda como turno assistant.
+---
 
-## Flujo RAG de ingesta
+## Flujo de arranque de la app
 
-1. ingest.py carga OLLAMA_BASE_URL desde .env.
-2. Extrae PDF fuente a Markdown con pymupdf4llm.
-3. Aplica split semantico por encabezados (#, ##, ###).
-4. Aplica split recursivo por tamano (chunk_size=1000, chunk_overlap=200).
-5. Enriquece metadata de cada chunk (source, chunk_id, header_1..3).
-6. Genera embeddings con OllamaEmbeddings (nomic-embed-text).
-7. Persiste documentos vectorizados en data/vector_db mediante Chroma.
+1. Streamlit ejecuta `ui/app.py`.
+2. `build_agent_graph()` construye y compila el grafo (una sola vez, cacheado con `lru_cache`).
+3. `load_ollama_settings()` lee `.env` y valida la configuración de Ollama.
+4. Se construye la página, el sidebar y se inicializa el `thread_id` de sesión en `session_state`.
 
-## Flujo RAG de consulta (tool consultar_teoria_drift)
+---
 
-1. Valida query de entrada.
-2. Lee parametros de recuperacion desde entorno (RAG_TOP_K, RAG_KEEP_TOP).
-3. Construye retriever Chroma y recupera top_k documentos.
-4. Aplica re-ranking lexico local por overlap de tokens.
-5. Conserva keep_top documentos y arma contexto estructurado con metadatos.
-6. Recorta el contexto si supera el limite interno de caracteres.
-7. Invoca LLM con instrucciones de respuesta anclada a evidencia.
-8. Devuelve respuesta final + bloque Fuentes consultadas.
+## Flujo por mensaje del usuario
 
-## Flujo de validacion de calidad RAG
+```
+Usuario escribe → st.chat_input
+        │
+        ▼
+  Se añade al chat_history de display
+        │
+        ▼
+  _run_agent_streaming()
+        │
+        ├── graph.stream(input_state, config={thread_id})
+        │       │
+        │       ▼
+        │   reasoning_node ──────────────────────────────────────────────┐
+        │       │                                                         │
+        │       │ ¿AIMessage con tool_calls?                              │
+        │       ├── No → END (respuesta directa)                         │
+        │       └── Sí → param_validation_node                           │
+        │                   │                                             │
+        │                   │ ¿Faltan parámetros?                         │
+        │                   ├── Sí → END (mensaje de solicitud)          │
+        │                   └── No → tool_execution_node                 │
+        │                               │                                 │
+        │                               └── ToolMessages → reasoning_node ┘
+        │                                                 (ciclo ReAct, máx. 5 iter.)
+        │
+        ▼
+  st.status() muestra pasos en tiempo real
+        │
+        ▼
+  Respuesta final → st.markdown() + chat_history
+```
 
-1. rag_quality_check.py define casos de prueba con terminos esperados.
-2. Cada caso llama a consultar_teoria_drift.invoke({"query": ...}).
-3. Se valida presencia de bloque Fuentes consultadas.
-4. Se cuentan coincidencias de terminos esperados.
-5. Se reporta PASS/WARN/FAIL y resumen final de fallos.
+### Detalle de cada paso
+
+1. El usuario escribe en `st.chat_input`.
+2. Se añade el turno `user` a `chat_history` (lista de display en `session_state`).
+3. Se construye `input_state` con el `HumanMessage`, la ruta al CSV activo e `iteration_count=0`.
+4. Se invoca `graph.stream(input_state, config={"configurable": {"thread_id": ...}})`.
+5. LangGraph fusiona el input con el checkpoint existente del hilo (`MemorySaver`).
+6. `reasoning_node` inyecta el `SystemMessage` (con o sin info de fichero) y llama al LLM con tools enlazadas.
+7. Si el LLM emite `tool_calls`:
+   - `param_validation_node` comprueba cada parámetro contra `TOOL_REQUIRED_PARAMS`.
+   - Si alguno falta: genera `AIMessage` de solicitud → `END`.
+   - Si todo completo: `tool_execution_node` ejecuta la herramienta mock y devuelve `ToolMessage`.
+   - El ciclo vuelve a `reasoning_node` para interpretar el resultado.
+8. Si el LLM responde texto directamente: `END`.
+9. Los eventos del stream actualizan `st.status()` en tiempo real con iconos de progreso.
+10. La respuesta final se muestra con `st.markdown()` y se guarda en `chat_history`.
+
+---
+
+## Flujo del file uploader
+
+1. El usuario sube un CSV en `st.file_uploader` del sidebar.
+2. `_save_uploaded_file()` escribe el fichero en `data/temp_uploads/{nombre_original}`.
+3. La ruta absoluta se guarda en `st.session_state["uploaded_file_path"]`.
+4. `_run_agent_streaming()` pasa la ruta en el campo `uploaded_file_path` del `AgentState`.
+5. `reasoning_node` detecta el fichero y construye el `SystemMessage` con el bloque de fichero activo, incluyendo nombre, ruta y tamaño.
+6. El LLM puede usar la ruta directamente como argumento `file_path` de las herramientas.
+
+---
+
+## Flujo RAG de ingesta (sin cambios)
+
+1. `ingest.py` extrae el PDF fuente a Markdown con `pymupdf4llm`.
+2. Segmenta por encabezados Markdown y luego por tamaño (`chunk_size=1000`, `overlap=200`).
+3. Genera embeddings con `nomic-embed-text` vía Ollama.
+4. Persiste en Chroma bajo `data/vector_db`.
+
+## Flujo RAG de consulta (implementado, pendiente de integración en el grafo)
+
+1. `consultar_teoria_drift(query)` recupera los `top_k` documentos más relevantes.
+2. Re-rankea por overlap léxico local.
+3. Construye contexto estructurado con metadatos de sección.
+4. Sintetiza respuesta con instrucciones de grounding estricto.
+5. Devuelve respuesta + bloque `Fuentes consultadas`.
+
+---
 
 ## Manejo de errores
 
-- Si falla carga de .env o conexion a Ollama, se propaga error controlado.
-- Si no existe base vectorial, retriever.py devuelve FileNotFoundError explicito.
-- Si falla retrieval o sintesis en rag_tool.py, se devuelve mensaje de error en texto plano.
-- La UI captura excepciones del chat y muestra mensaje amigable.
+| Origen | Comportamiento |
+|---|---|
+| Ollama no disponible | `_check_ollama_connection()` lanza `ConnectionError`; la UI muestra mensaje amigable con detalle técnico |
+| Iteraciones excedidas (`>5`) | `reasoning_node` genera `AIMessage` de parada y el grafo termina en `END` |
+| Parámetros faltantes | `param_validation_node` genera mensaje de solicitud al usuario; no se lanza excepción |
+| Base vectorial ausente | `retriever.py` lanza `FileNotFoundError` explícito |
+| Excepción general en stream | Capturada en `_run_agent_streaming()`, `st.status` cambia a estado `error` |
 
-## Nota sobre cache
+---
 
-get_chat_ollama() usa lru_cache(maxsize=1). Esto evita recrear el cliente en cada turno y mejora estabilidad/performance del chat y de la sintesis RAG.
+## Notas sobre caché
+
+- `get_chat_ollama()` — `@lru_cache(maxsize=1)`: un solo cliente ChatOllama por proceso.
+- `get_llm_with_tools()` — sin caché: `bind_tools` puede variar; reutiliza el cliente base cacheado.
+- `build_agent_graph()` — `@lru_cache(maxsize=1)`: el grafo se compila una sola vez por proceso Streamlit, evitando reconstrucciones en cada rerun.
