@@ -2,7 +2,7 @@
 .venv/
 venv/
 env/
-
+.venv_*/
 # Variables de entorno
 .env
 .env.local
@@ -48,3 +48,4 @@ Thumbs.db
 data/**/*
 !data/**/
 !data/**/.gitkeep
+CLAUDE.md
