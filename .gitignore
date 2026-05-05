@@ -2,7 +2,7 @@
 .venv/
 venv/
 env/
-
+.venv_becnchmark/
 # Variables de entorno
 .env
 .env.local
@@ -48,3 +48,5 @@ Thumbs.db
 data/**/*
 !data/**/
 !data/**/.gitkeep
+CLAUDE.md
+
