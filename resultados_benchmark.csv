@@ -1,0 +1,17 @@
+modelo,caso_id,caso_nombre,tiempo_s,tokens_por_s,herramienta_invocada,herramienta_correcta,json_valido,args_requeridos_presentes,precision_args_pct,error
+qwen2.5:7b-instruct-q4_K_M,TC-01,Drift detection - args completos,55.916,28.81,detectar_drift_ks,True,True,True,100.0,
+qwen2.5:7b-instruct-q4_K_M,TC-02,Generación sintética - args mínimos,1.834,27.98,generar_serie_sintetica,True,True,True,100.0,
+qwen2.5:7b-instruct-q4_K_M,TC-03,Aumento de datos - relación lineal,2.673,28.43,aumentar_datos_relacion_lineal,True,True,True,100.0,
+qwen2.5:7b-instruct-q4_K_M,TC-04,Herramienta correcta entre ambigüedad,2.823,27.58,detectar_drift_ks,True,True,True,100.0,
+llama3.1:8b-instruct-q4_K_M,TC-01,Drift detection - args completos,66.617,16.07,detectar_drift_ks,True,True,True,100.0,
+llama3.1:8b-instruct-q4_K_M,TC-02,Generación sintética - args mínimos,2.786,18.3,generar_serie_sintetica,True,True,True,100.0,
+llama3.1:8b-instruct-q4_K_M,TC-03,Aumento de datos - relación lineal,4.272,17.26,aumentar_datos_relacion_lineal,True,True,True,75.0,
+llama3.1:8b-instruct-q4_K_M,TC-04,Herramienta correcta entre ambigüedad,3.9,18.64,detectar_drift_ks,True,True,True,100.0,
+qwen2.5-coder:7b-instruct-q4_K_M,TC-01,Drift detection - args completos,68.431,22.97,,False,False,False,0.0,
+qwen2.5-coder:7b-instruct-q4_K_M,TC-02,Generación sintética - args mínimos,2.817,23.44,,False,False,False,0.0,
+qwen2.5-coder:7b-instruct-q4_K_M,TC-03,Aumento de datos - relación lineal,3.808,22.64,,False,False,False,0.0,
+qwen2.5-coder:7b-instruct-q4_K_M,TC-04,Herramienta correcta entre ambigüedad,3.221,23.38,,False,False,False,0.0,
+mistral:7b-instruct-q4_K_M,TC-01,Drift detection - args completos,0.105,0.0,ERROR,False,False,False,0.0,registry.ollama.ai/library/mistral:7b-instruct-q4_K_M does not support tools (status code: 400)
+mistral:7b-instruct-q4_K_M,TC-02,Generación sintética - args mínimos,0.045,0.0,ERROR,False,False,False,0.0,registry.ollama.ai/library/mistral:7b-instruct-q4_K_M does not support tools (status code: 400)
+mistral:7b-instruct-q4_K_M,TC-03,Aumento de datos - relación lineal,0.047,0.0,ERROR,False,False,False,0.0,registry.ollama.ai/library/mistral:7b-instruct-q4_K_M does not support tools (status code: 400)
+mistral:7b-instruct-q4_K_M,TC-04,Herramienta correcta entre ambigüedad,0.043,0.0,ERROR,False,False,False,0.0,registry.ollama.ai/library/mistral:7b-instruct-q4_K_M does not support tools (status code: 400)
