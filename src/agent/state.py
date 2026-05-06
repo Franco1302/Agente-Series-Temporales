@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Optional
 
+from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
@@ -18,20 +19,26 @@ class AgentState(TypedDict):
     """
 
     # Historial completo de mensajes (HumanMessage, AIMessage, ToolMessage…)
-    # add_messages acumula en lugar de reemplazar cuando se hace una actualización parcial.
-    messages: Annotated[list, add_messages]
-
-    # Últimos resultados de herramientas ejecutadas: {nombre_herramienta: resultado}
-    tool_results: dict[str, Any]
-
-    # Reservado para contexto RAG inyectado antes de razonar (vacío en esta iteración)
-    rag_context: str
-
-    # Parámetros detectados como faltantes en la última tool call
-    pending_params: list[str]
+    messages: Annotated[list[BaseMessage], add_messages]
 
     # Ruta al CSV cargado por el usuario desde el sidebar (None si no hay fichero)
-    uploaded_file_path: str | None
+    csv_path: Optional[str]
 
-    # Contador de iteraciones del ciclo ReAct para evitar bucles infinitos
-    iteration_count: int
+    # Columnas, nº de filas y dtypes inferidos del CSV activo
+    csv_metadata: Optional[dict]
+
+    # Nombre de la herramienta en espera de completar sus parámetros
+    pending_tool: Optional[str]
+
+    # Parámetros recogidos hasta el momento para la herramienta pendiente
+    # {nombre_param: valor_o_None}; None cuando no hay herramienta pendiente
+    pending_params: Optional[dict]
+
+    # Fragmentos de documentación recuperados por el nodo recuperar_contexto
+    rag_context: Optional[str]
+
+    # Contador de errores consecutivos; limita el bucle de reintentos (máx. 3)
+    error_count: int
+
+    # Descripción estructurada del último error para informar al usuario
+    error_info: Optional[str]
