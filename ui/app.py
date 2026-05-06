@@ -169,9 +169,12 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
                             continue
                         tool_name = _extract_tool_name_from_ai_message(msg)
                         if tool_name:
-                            status.write("🧠 Razonando sobre tu petición…")
+                            status.write(f"🧠 Razonando: invocando **{tool_name}**…")
                         elif msg.content:
-                            status.write("🧠 Razonando sobre tu petición…")
+                            status.write("🧠 Razonando, generando respuesta…")
+                            # El razonador ya produjo la respuesta final.
+                            # El grafo enruta directamente a END en este caso.
+                            final_response = msg.content
 
                 elif node_name == "ejecutar_herramienta":
                     for msg in messages_out:

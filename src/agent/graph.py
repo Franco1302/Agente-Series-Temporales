@@ -26,11 +26,15 @@ def build_agent_graph():
     """Construye y compila el grafo del agente con persistencia en memoria.
 
     Implementa la arquitectura cíclica ReAct con 6 nodos:
-        razonador → ejecutar_herramienta → razonador  (ciclo ReAct)
-        razonador → recuperar_contexto → razonador    (ciclo RAG)
-        razonador → solicitar_parametros → END
-        razonador → generar_respuesta → END
-        ejecutar_herramienta → gestionar_error → solicitar_parametros | generar_respuesta
+        razonador (con tool_call)        → ejecutar_herramienta → razonador  (ciclo ReAct)
+        razonador (consultar_teoria)     → recuperar_contexto    → razonador  (ciclo RAG)
+        razonador (tool_call sin params) → solicitar_parametros  → END
+        razonador (texto plano)          → END                                (camino feliz)
+        ejecutar_herramienta (error)     → gestionar_error → solicitar_parametros | generar_respuesta
+
+    `generar_respuesta` solo se usa en el camino de error porque, en el camino
+    feliz, el razonador ya emite la respuesta final y una segunda llamada al
+    LLM gastaría latencia y devolvería content vacío.
 
     Se cachea con lru_cache para evitar reconstruirlo en cada petición de Streamlit.
 
@@ -51,6 +55,8 @@ def build_agent_graph():
     builder.add_edge(START, "razonador")
 
     # ── Enrutamiento desde razonador (4 destinos) ─────────────────────────────
+    # "fin" → END directamente: si razonador respondió en texto sin tool_calls,
+    # ya tenemos la respuesta final y no hace falta una segunda invocación al LLM.
     builder.add_conditional_edges(
         "razonador",
         route_after_razonador,
@@ -58,7 +64,7 @@ def build_agent_graph():
             "ejecutar_herramienta": "ejecutar_herramienta",
             "solicitar_parametros": "solicitar_parametros",
             "recuperar_contexto": "recuperar_contexto",
-            "generar_respuesta": "generar_respuesta",
+            "fin": END,
         },
     )
 

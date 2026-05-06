@@ -15,19 +15,24 @@ def route_after_razonador(state: AgentState) -> str:
     - Si el LLM emitió tool_call para consultar_teoria → recuperar_contexto
     - Si el LLM emitió tool_call pero faltan parámetros  → solicitar_parametros
     - Si el LLM emitió tool_call completa               → ejecutar_herramienta
-    - Si el LLM respondió directamente (sin tool_calls)  → generar_respuesta
+    - Si el LLM respondió directamente (sin tool_calls)  → fin (END)
+
+    El razonador ya produjo la respuesta final; volver a invocar al LLM en
+    `generar_respuesta` doblaría el tiempo y suele devolver content vacío
+    porque el modelo ve que ya hay un AIMessage con la respuesta.
+    `generar_respuesta` queda reservado para el camino de error.
     """
     messages = state.get("messages", [])
     if not messages:
-        return "generar_respuesta"
+        return "fin"
 
     last = messages[-1]
     if not isinstance(last, AIMessage):
-        return "generar_respuesta"
+        return "fin"
 
     tool_calls = getattr(last, "tool_calls", None) or []
     if not tool_calls:
-        return "generar_respuesta"
+        return "fin"
 
     call = tool_calls[0]
     tool_name = call.get("name", "") if isinstance(call, dict) else getattr(call, "name", "")
@@ -56,9 +61,9 @@ def route_after_tool(state: AgentState) -> str:
 def route_after_error(state: AgentState) -> str:
     """Decide el siguiente nodo tras gestionar_error.
 
-    - Si se alcanzó el límite de errores → generar_respuesta (abortar)
-    - Si el error parece de parámetros   → solicitar_parametros
-    - Por defecto                         → solicitar_parametros (más seguro que abortar)
+    - Si se alcanzó el límite de errores → generar_respuesta (abortar con disculpa)
+    - Si el error parece de parámetros   → solicitar_parametros (pedir datos al usuario)
+    - Por defecto (errores no recuperables: timeouts, conexión, runtime) → generar_respuesta
     """
     error_count = state.get("error_count", 0)
     if error_count >= 3:
@@ -68,4 +73,4 @@ def route_after_error(state: AgentState) -> str:
     if any(kw in error_info for kw in _PARAM_ERROR_KEYWORDS):
         return "solicitar_parametros"
 
-    return "solicitar_parametros"
+    return "generar_respuesta"

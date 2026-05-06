@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from langchain_core.messages import SystemMessage
+import json
+import re
+import uuid
+
+from langchain_core.messages import AIMessage, SystemMessage
 
 from src.agent.nodes.param_request import TOOL_REQUIRED_PARAMS
 from src.agent.prompts import build_system_prompt
@@ -11,6 +15,55 @@ from src.agent.tools import AGENT_TOOLS
 from src.config.llm_config import get_llm_with_tools
 
 _MAX_ERRORS = 3
+
+_KNOWN_TOOL_NAMES = {t.name for t in AGENT_TOOLS}
+_JSON_TOOLCALL_RE = re.compile(
+    r'\{[^{}]*"name"\s*:\s*"(?P<name>[\w\-]+)"[^{}]*"(?:arguments|args|parameters)"\s*:\s*(?P<args>\{.*?\})\s*\}',
+    re.DOTALL,
+)
+
+
+def _coerce_text_toolcall(message: AIMessage) -> AIMessage:
+    """Promueve una tool call emitida como JSON en `content` a `tool_calls`.
+
+    Algunos modelos cuantizados (p. ej. qwen2.5-coder q4) no respetan el
+    protocolo nativo de tool calling de Ollama y emiten el objeto
+    {"name": ..., "arguments": {...}} dentro de `content`. Este helper detecta
+    ese patrón, sintetiza un tool_call estándar y limpia el content para
+    que el resto del grafo (route_after_razonador, ToolNode) lo trate como
+    una tool call legítima.
+    """
+    if getattr(message, "tool_calls", None):
+        return message
+
+    content = message.content
+    if not isinstance(content, str) or "name" not in content:
+        return message
+
+    for match in _JSON_TOOLCALL_RE.finditer(content):
+        name = match.group("name")
+        if name not in _KNOWN_TOOL_NAMES:
+            continue
+        try:
+            args = json.loads(match.group("args"))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(args, dict):
+            continue
+
+        synthetic_call = {
+            "name": name,
+            "args": args,
+            "id": f"call_{uuid.uuid4().hex[:12]}",
+            "type": "tool_call",
+        }
+        return AIMessage(
+            content="",
+            tool_calls=[synthetic_call],
+            additional_kwargs=getattr(message, "additional_kwargs", {}) or {},
+        )
+
+    return message
 
 
 def razonador_node(state: AgentState) -> dict:
@@ -26,7 +79,6 @@ def razonador_node(state: AgentState) -> dict:
     error_count = state.get("error_count", 0)
 
     if error_count >= _MAX_ERRORS:
-        from langchain_core.messages import AIMessage
         return {
             "messages": [
                 AIMessage(
@@ -57,6 +109,7 @@ def razonador_node(state: AgentState) -> dict:
 
     llm = get_llm_with_tools(AGENT_TOOLS)
     response = llm.invoke(messages)
+    response = _coerce_text_toolcall(response)
 
     updates: dict = {
         "messages": [response],
