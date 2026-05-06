@@ -12,11 +12,11 @@ def recuperar_contexto_node(state: AgentState) -> dict:
     """Ejecuta una búsqueda RAG y almacena el resultado en `rag_context`.
 
     Extrae la consulta del último HumanMessage del historial, llama a
-    `consultar_teoria_drift` y devuelve el contexto recuperado para que
+    `consultar_teoria` y devuelve el contexto recuperado para que
     razonador lo inyecte como SystemMessage en el siguiente ciclo.
 
     Este nodo NO invoca el LLM directamente: la síntesis ya ocurre
-    dentro de consultar_teoria_drift. Su única responsabilidad es
+    dentro de consultar_teoria. Su única responsabilidad es
     popular `rag_context`.
     """
     messages = state.get("messages", [])
