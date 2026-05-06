@@ -6,7 +6,7 @@ import json
 import re
 import uuid
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
 from src.agent.nodes.param_request import TOOL_REQUIRED_PARAMS
 from src.agent.prompts import build_system_prompt
@@ -66,6 +66,19 @@ def _coerce_text_toolcall(message: AIMessage) -> AIMessage:
     return message
 
 
+def _last_tool_message_name(messages: list) -> str | None:
+    """Devuelve el nombre del último ToolMessage del historial, o None."""
+    for msg in reversed(messages):
+        if isinstance(msg, ToolMessage):
+            return getattr(msg, "name", None)
+        if isinstance(msg, (AIMessage,)):
+            # Si vemos un AIMessage de texto plano (sin tool_calls), el ciclo
+            # anterior ya cerró. No buscamos más atrás.
+            if not getattr(msg, "tool_calls", None):
+                return None
+    return None
+
+
 def razonador_node(state: AgentState) -> dict:
     """Invoca el LLM con el estado actual y decide la próxima acción.
 
@@ -73,8 +86,10 @@ def razonador_node(state: AgentState) -> dict:
     incompletos y, en ese caso, registra `pending_tool` y `pending_params`
     para que el router desvíe el flujo a solicitar_parametros.
 
-    Si `rag_context` está poblado (ciclo RAG activo), lo inyecta como
-    SystemMessage adicional y lo limpia del estado para evitar reutilizarlo.
+    Defensa anti-bucle: si el último ToolMessage del historial proviene de
+    `consultar_teoria`, se retira esa herramienta del bind para que el LLM
+    no pueda reinvocarla en la síntesis. El `ToolMessage` ya contiene la
+    respuesta del RAG, así que el modelo debe sintetizar en texto.
     """
     error_count = state.get("error_count", 0)
 
@@ -92,7 +107,6 @@ def razonador_node(state: AgentState) -> dict:
 
     csv_path = state.get("csv_path")
     csv_metadata = state.get("csv_metadata")
-    rag_context = state.get("rag_context")
 
     system_prompt = build_system_prompt(csv_path=csv_path, csv_metadata=csv_metadata)
 
@@ -102,18 +116,20 @@ def razonador_node(state: AgentState) -> dict:
     if not messages or not isinstance(messages[0], SystemMessage):
         messages = [SystemMessage(content=system_prompt)] + messages
 
-    # Inyectar contexto RAG como segundo SystemMessage si está disponible
-    if rag_context:
-        rag_msg = SystemMessage(content=f"CONTEXTO TEÓRICO RECUPERADO:\n{rag_context}")
-        messages = [messages[0], rag_msg] + messages[1:]
+    # Selección de tools: si el último ToolMessage es de consultar_teoria,
+    # excluimos esa tool del bind para impedir bucles RAG → RAG → RAG.
+    if _last_tool_message_name(messages) == "consultar_teoria":
+        tools_for_bind = [t for t in AGENT_TOOLS if t.name != "consultar_teoria"]
+    else:
+        tools_for_bind = AGENT_TOOLS
 
-    llm = get_llm_with_tools(AGENT_TOOLS)
+    llm = get_llm_with_tools(tools_for_bind)
     response = llm.invoke(messages)
     response = _coerce_text_toolcall(response)
 
     updates: dict = {
         "messages": [response],
-        "rag_context": None,  # consumido; evitar reinyección en el siguiente ciclo
+        "rag_context": None,
     }
 
     # Detectar si hay una tool call y si le faltan parámetros

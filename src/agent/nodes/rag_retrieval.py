@@ -38,16 +38,17 @@ def _extract_query(state: AgentState) -> str:
 
 
 def recuperar_contexto_node(state: AgentState) -> dict:
-    """Ejecuta una búsqueda RAG y almacena el resultado en `rag_context`.
+    """Ejecuta una búsqueda RAG y devuelve el resultado como ToolMessage.
 
     Toma la consulta refinada que el LLM emitió en la tool call de
-    `consultar_teoria`, llama a la herramienta y devuelve el contexto para
-    que razonador lo inyecte como SystemMessage en el siguiente ciclo.
+    `consultar_teoria`, llama a la herramienta y emite el ToolMessage
+    de cierre asociado al `tool_call_id`. El razonador, en su siguiente
+    pasada, leerá ese ToolMessage como respuesta natural a su tool call
+    y sintetizará la respuesta final.
 
-    Como el ciclo RAG vuelve a `razonador`, también devuelve un ToolMessage
-    de cierre asociado a la tool call: sin él, ChatOllama recibe un
-    AIMessage con tool_calls sin respuesta y lanza el error
-    "tool call without a corresponding tool message".
+    Sin el ToolMessage, ChatOllama lanza el error
+    "tool call without a corresponding tool message" cuando el ciclo
+    vuelve al razonador.
     """
     messages = state.get("messages", [])
     query_text = _extract_query(state)
@@ -65,21 +66,20 @@ def recuperar_contexto_node(state: AgentState) -> dict:
             )
         break
 
-    if not query_text:
-        return {"rag_context": None}
+    if not query_text or not tool_call_id:
+        return {}
 
     result = consultar_teoria.invoke({"query": query_text})
 
     if isinstance(result, str) and result.startswith("Error:"):
-        return {"error_info": result, "rag_context": None}
+        return {"error_info": result}
 
-    updates: dict = {"rag_context": str(result)}
-    if tool_call_id:
-        updates["messages"] = [
+    return {
+        "messages": [
             ToolMessage(
                 content=str(result),
                 name="consultar_teoria",
                 tool_call_id=tool_call_id,
             )
         ]
-    return updates
+    }
