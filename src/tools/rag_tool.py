@@ -174,7 +174,7 @@ def _generate_grounded_answer(query: str, context: str) -> str:
 
 
 @tool
-def consultar_teoria_drift(query: str) -> str:
+def consultar_teoria(query: str) -> str:
     """Consulta teoria tecnica del TFG de referencia para responder con base documental.
 
     Usa esta herramienta cuando necesites contexto fiable sobre:
