@@ -32,9 +32,9 @@ def _get_chat_history() -> list[dict]:
     return cast(list[dict], st.session_state["chat_history"])
 
 
-def _get_uploaded_file_path() -> str | None:
+def _get_csv_path() -> str | None:
     """Devuelve la ruta al CSV activo de la sesión, o None si no hay ninguno."""
-    return cast(str | None, st.session_state.get("uploaded_file_path"))
+    return cast(str | None, st.session_state.get("csv_path"))
 
 
 def _reset_chat_state() -> None:
@@ -65,8 +65,9 @@ def _init_page() -> None:
     )
     st.title("Asistente IA de Series Temporales")
     st.caption(
-        "Agente LangGraph con Tool Calling — "
-        "Sube un CSV en el panel lateral y pregunta lo que necesites."
+        "Agente LangGraph con Tool Calling y RAG — "
+        "Sube un CSV en el panel lateral y pregunta lo que necesites. "
+        "También puedes consultar teoría sobre data drift y series temporales."
     )
 
 
@@ -89,14 +90,14 @@ def _render_sidebar() -> None:
 
     if uploaded_file is not None:
         saved_path = _save_uploaded_file(uploaded_file)
-        st.session_state["uploaded_file_path"] = saved_path
+        st.session_state["csv_path"] = saved_path
         file_size_kb = Path(saved_path).stat().st_size / 1024
         st.sidebar.success(
             f"**{uploaded_file.name}** cargado  \n"
             f"{file_size_kb:.1f} KB · `{saved_path}`"
         )
-    elif _get_uploaded_file_path():
-        active_path = _get_uploaded_file_path()
+    elif _get_csv_path():
+        active_path = _get_csv_path()
         st.sidebar.info(f"Fichero activo: `{Path(active_path).name}`")
 
     st.sidebar.divider()
@@ -133,7 +134,7 @@ def _extract_tool_name_from_ai_message(msg: AIMessage) -> str | None:
     return getattr(first, "name", None)
 
 
-def _run_agent_streaming(user_prompt: str, uploaded_file_path: str | None) -> str:
+def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
     """Invoca el grafo con streaming y renderiza el progreso mediante st.status().
 
     Devuelve el texto final de respuesta del agente para añadirlo al historial.
@@ -144,13 +145,11 @@ def _run_agent_streaming(user_prompt: str, uploaded_file_path: str | None) -> st
 
     input_state = {
         "messages": [HumanMessage(content=user_prompt)],
-        "uploaded_file_path": uploaded_file_path,
-        "iteration_count": 0,
-        "pending_params": [],
+        "csv_path": csv_path,
+        "error_count": 0,
     }
 
     final_response = ""
-    reasoning_count = 0
 
     with st.status("Procesando tu petición…", expanded=True) as status:
         try:
@@ -164,32 +163,37 @@ def _run_agent_streaming(user_prompt: str, uploaded_file_path: str | None) -> st
                 node_output: dict = event[node_name]
                 messages_out: list = node_output.get("messages", [])
 
-                if node_name == "reasoning_node":
-                    reasoning_count += 1
+                if node_name == "razonador":
                     for msg in messages_out:
                         if not isinstance(msg, AIMessage):
                             continue
                         tool_name = _extract_tool_name_from_ai_message(msg)
                         if tool_name:
-                            # Primera ronda: razonó y decidió llamar a una tool
                             status.write("🧠 Razonando sobre tu petición…")
                         elif msg.content:
-                            if reasoning_count == 1:
-                                status.write("🧠 Razonando sobre tu petición…")
-                            else:
-                                status.write("✅ Resultado obtenido, generando respuesta…")
-                            final_response = msg.content
+                            status.write("🧠 Razonando sobre tu petición…")
 
-                elif node_name == "param_validation_node":
-                    for msg in messages_out:
-                        if isinstance(msg, AIMessage) and msg.content:
-                            # El nodo detectó parámetros faltantes: su mensaje ES la respuesta
-                            final_response = msg.content
-
-                elif node_name == "tool_execution_node":
+                elif node_name == "ejecutar_herramienta":
                     for msg in messages_out:
                         if isinstance(msg, ToolMessage):
-                            status.write(f"🔧 Ejecutando herramienta: **{msg.name}**…")
+                            status.write(f"Ejecutando herramienta: **{msg.name}**…")
+
+                elif node_name == "solicitar_parametros":
+                    for msg in messages_out:
+                        if isinstance(msg, AIMessage) and msg.content:
+                            final_response = msg.content
+
+                elif node_name == "recuperar_contexto":
+                    status.write("Consultando base de conocimiento…")
+
+                elif node_name == "gestionar_error":
+                    status.write("Gestionando error, reintentando…")
+
+                elif node_name == "generar_respuesta":
+                    for msg in messages_out:
+                        if isinstance(msg, AIMessage) and msg.content:
+                            status.write("Resultado obtenido, generando respuesta…")
+                            final_response = msg.content
 
             status.update(label="✅ Listo", state="complete", expanded=False)
 
@@ -222,7 +226,7 @@ def main() -> None:
         try:
             assistant_reply = _run_agent_streaming(
                 user_prompt=user_prompt,
-                uploaded_file_path=_get_uploaded_file_path(),
+                csv_path=_get_csv_path(),
             )
             if assistant_reply:
                 st.markdown(assistant_reply)
