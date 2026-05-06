@@ -3,7 +3,6 @@
 Ejecutar desde la raíz del proyecto:
     python -m scripts.test_agent
     python -m scripts.test_agent --caso 1
-    python -m scripts.test_agent --caso 2
     python -m scripts.test_agent --todos
 """
 
@@ -26,7 +25,7 @@ class TestCase:
 
     nombre: str
     mensaje: str
-    uploaded_file_path: str | None = None
+    csv_path: str | None = None
     # Términos que deben aparecer en la respuesta final (al menos uno)
     términos_esperados: list[str] = field(default_factory=list)
     # Si True, se espera que el agente ejecute al menos una herramienta
@@ -42,21 +41,21 @@ CASOS: list[TestCase] = [
             "Analiza el drift en el fichero 'data/temp_uploads/ventas.csv' "
             "sobre la columna 'precio' usando un umbral de 0.05."
         ),
-        uploaded_file_path="data/temp_uploads/ventas.csv",
+        csv_path="data/temp_uploads/ventas.csv",
         términos_esperados=["drift", "p_value", "kolmogorov", "precio", "umbral", "0.05"],
         espera_tool_call=True,
     ),
     TestCase(
         nombre="Parámetros incompletos — agente pide datos",
         mensaje="Genera una serie temporal sintética.",
-        uploaded_file_path=None,
+        csv_path=None,
         términos_esperados=["start_date", "periods", "frequency", "distribution", "necesito", "proporcion"],
-        espera_tool_call=False,  # No debe ejecutar sin parámetros
+        espera_tool_call=False,
     ),
     TestCase(
         nombre="Pregunta general sin herramienta",
         mensaje="¿Qué es el data drift y cuándo debo preocuparme por él?",
-        uploaded_file_path=None,
+        csv_path=None,
         términos_esperados=["drift", "distribución", "datos", "modelo"],
         espera_tool_call=False,
     ),
@@ -67,9 +66,25 @@ CASOS: list[TestCase] = [
             "'data/temp_uploads/ventas.csv' usando la columna 'precio' "
             "con pendiente 1.1 e intercepto 50."
         ),
-        uploaded_file_path="data/temp_uploads/ventas.csv",
+        csv_path="data/temp_uploads/ventas.csv",
         términos_esperados=["augment", "precio_ajustado", "pendiente", "columna", "fichero"],
         espera_tool_call=True,
+    ),
+    TestCase(
+        nombre="Consulta teórica RAG — Kolmogorov-Smirnov",
+        mensaje="¿Qué es el test de Kolmogorov-Smirnov y para qué sirve en la detección de drift?",
+        csv_path=None,
+        términos_esperados=["kolmogorov", "drift", "distribución"],
+        espera_tool_call=True,  # debe llamar a consultar_teoria
+    ),
+    TestCase(
+        nombre="Recuperación de error de parámetros vacíos",
+        mensaje=(
+            "Analiza el drift en el fichero '' sobre la columna 'precio'."
+        ),
+        csv_path=None,
+        términos_esperados=["ruta", "fichero", "necesito", "proporciona"],
+        espera_tool_call=False,  # debe pedir el file_path correcto, no ejecutar
     ),
 ]
 
@@ -83,8 +98,11 @@ def _run_case(caso: TestCase, verbose: bool = True) -> bool:
     print(f"CASO: {caso.nombre}")
     print(separador)
     print(f"Mensaje:  {textwrap.shorten(caso.mensaje, width=80)}")
-    print(f"Fichero:  {caso.uploaded_file_path or '(ninguno)'}")
+    print(f"Fichero:  {caso.csv_path or '(ninguno)'}")
     print()
+
+    # Limpiar la caché del grafo entre pruebas para evitar estado residual
+    build_agent_graph.cache_clear()
 
     graph = build_agent_graph()
     thread_id = f"test-{caso.nombre[:20].replace(' ', '-')}"
@@ -92,9 +110,8 @@ def _run_case(caso: TestCase, verbose: bool = True) -> bool:
 
     input_state: dict[str, Any] = {
         "messages": [HumanMessage(content=caso.mensaje)],
-        "uploaded_file_path": caso.uploaded_file_path,
-        "iteration_count": 0,
-        "pending_params": [],
+        "csv_path": caso.csv_path,
+        "error_count": 0,
     }
 
     final_response = ""
