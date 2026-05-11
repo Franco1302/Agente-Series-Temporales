@@ -20,7 +20,12 @@ _FREQ = Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"]
 
 
 def _resolve_horizon(end_date: Optional[str], periods: Optional[int]) -> tuple[str, dict]:
-    """Devuelve (sufijo_endpoint, extra_params). Valida la exclusión end_date xor periods."""
+    """Resuelve el horizonte para el endpoint y valida la exclusividad.
+
+    - Requiere exactamente uno de `end_date` o `periods`.
+    - Devuelve el sufijo de endpoint ("periodos" o "fin") y los parametros extra.
+    - Lanza ValueError si se pasan ambos o ninguno.
+    """
     if (end_date is None) == (periods is None):
         raise ValueError(
             "Debes proporcionar 'periods' O 'end_date' (no ambos, no ninguno)."
@@ -30,7 +35,17 @@ def _resolve_horizon(end_date: Optional[str], periods: Optional[int]) -> tuple[s
     return "fin", {"fin": end_date}
 
 
-async def _download_csv(client: httpx.AsyncClient, endpoint: str, params: dict, out_name: str) -> Path:
+async def _download_csv(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    params: dict,
+    out_name: str,
+) -> Path:
+    """Descarga el CSV generado por el backend y lo guarda en el workspace.
+
+    Hace un GET al endpoint MCP con los params, escribe el contenido recibido
+    en `workspace_dir/out_name` y devuelve la ruta local.
+    """
     response = await client.get(endpoint, params=params)
     response.raise_for_status()
     target = _SETTINGS.workspace_dir / out_name
@@ -44,6 +59,10 @@ async def _download_png(
     params: dict,
     out_name: str,
 ) -> Path:
+    """Descarga el PNG de la grafica asociado a la serie generada.
+
+    El flujo es equivalente a `_download_csv`, pero guardando el binario PNG.
+    """
     response = await client.get(endpoint, params=params)
     response.raise_for_status()
     target = _SETTINGS.workspace_dir / out_name
@@ -52,6 +71,7 @@ async def _download_png(
 
 
 def _row_count(csv_path: Path) -> int:
+    """Cuenta filas de datos (excluye cabecera). Devuelve 0 si falla la lectura."""
     try:
         with csv_path.open("r", encoding="utf-8") as fh:
             return max(sum(1 for _ in fh) - 1, 0)
@@ -62,6 +82,7 @@ def _row_count(csv_path: Path) -> int:
 # Schemas internos (usados por tests unitarios — el LLM ve params planos).
 
 class GenerateDistributionInput(BaseModel):
+    """Schema interno para distribuciones (usado en tests y validacion)."""
     start_date: str
     end_date: Optional[str] = None
     periods: Optional[int] = None
@@ -73,6 +94,7 @@ class GenerateDistributionInput(BaseModel):
 
 
 class GenerateArmaInput(BaseModel):
+    """Schema interno para ARMA con parametros de ruido y estacionalidad."""
     start_date: str
     end_date: Optional[str] = None
     periods: Optional[int] = None
@@ -87,6 +109,7 @@ class GenerateArmaInput(BaseModel):
 
 
 class GeneratePeriodicInput(BaseModel):
+    """Schema interno para series periodicas con patron repetitivo."""
     start_date: str
     end_date: Optional[str] = None
     periods: Optional[int] = None
@@ -100,6 +123,7 @@ class GeneratePeriodicInput(BaseModel):
 
 
 class GenerateTrendInput(BaseModel):
+    """Schema interno para series con tendencia determinista y ruido opcional."""
     start_date: str
     end_date: Optional[str] = None
     periods: Optional[int] = None
@@ -134,12 +158,18 @@ async def generate_synthetic_distribution(
     column_name: Annotated[str, Field(description="Nombre de la columna generada.")] = "valor",
     with_plot: Annotated[bool, Field(description="Si True, genera además un PNG con la gráfica.")] = False,
 ) -> dict:
-    """Genera una serie temporal sintética siguiendo una distribución estadística.
+    """Genera una serie temporal sintética siguiendo una distribución estadistica.
 
-    USA cuando el usuario quiera crear datos artificiales con una distribución conocida
+    USA cuando el usuario quiera crear datos artificiales con una distribucion conocida
     (Normal, Poisson, Uniforme, Beta, Gamma...). NO uses si la serie debe tener
-    autocorrelación (usa generate_synthetic_arma) ni patrones cíclicos
+    autocorrelacion (usa generate_synthetic_arma) ni patrones ciclicos
     (usa generate_synthetic_periodic).
+
+    Flujo MCP:
+    1) Normaliza la entrada con el schema interno.
+    2) Resuelve horizonte (periodos o fin) y compone endpoint.
+    3) Descarga el CSV generado por el backend y lo guarda en el workspace.
+    4) Si `with_plot=True`, descarga el PNG asociado.
 
     Pasa `periods` O `end_date`, no ambos.
 
@@ -208,8 +238,14 @@ async def generate_synthetic_arma(
 ) -> dict:
     """Genera una serie temporal con estructura ARMA(p,q).
 
-    USA cuando el usuario pida datos con autocorrelación temporal, AR(p), MA(q),
+    USA cuando el usuario pida datos con autocorrelacion temporal, AR(p), MA(q),
     ARMA(p,q) o estacionalidad fija. Pasa `periods` O `end_date`, no ambos.
+
+    Flujo MCP:
+    1) Normaliza la entrada y valida el horizonte.
+    2) Compone el endpoint /Datos/ARMA/{periodos|fin}.
+    3) Descarga el CSV generado y lo guarda en el workspace.
+    4) Si `with_plot=True`, descarga el PNG correspondiente.
 
     Devuelve: output_path, rows_generated, image_path, summary, model_spec.
     """
@@ -283,10 +319,16 @@ async def generate_synthetic_periodic(
     column_name: Annotated[str, Field(description="Nombre de la columna.")] = "valor",
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = False,
 ) -> dict:
-    """Genera una serie temporal con patrones cíclicos repetidos.
+    """Genera una serie temporal con patrones ciclicos repetidos.
 
     USA cuando el usuario mencione estacionalidad observable (semanal, mensual, anual),
-    patrones que se repiten cada N observaciones, o simulación de demanda con ciclos.
+    patrones que se repiten cada N observaciones, o simulacion de demanda con ciclos.
+
+    Flujo MCP:
+    1) Normaliza la entrada y valida el horizonte.
+    2) Compone el endpoint /Datos/periodicos/{periodos|fin}.
+    3) Descarga el CSV generado y lo guarda en el workspace.
+    4) Si `with_plot=True`, descarga el PNG correspondiente.
 
     Pasa `periods` O `end_date`, no ambos.
 
@@ -356,8 +398,14 @@ async def generate_synthetic_trend(
 ) -> dict:
     """Genera una serie temporal con tendencia determinista.
 
-    USA cuando el usuario quiera datos con crecimiento o decrecimiento sistemático,
-    o simulación de procesos no estacionarios con tendencia conocida.
+    USA cuando el usuario quiera datos con crecimiento o decrecimiento sistematico,
+    o simulacion de procesos no estacionarios con tendencia conocida.
+
+    Flujo MCP:
+    1) Normaliza la entrada y valida el horizonte.
+    2) Compone el endpoint /Datos/tendencia/{periodos|fin}.
+    3) Descarga el CSV generado y lo guarda en el workspace.
+    4) Si `with_plot=True`, descarga el PNG correspondiente.
 
     Pasa `periods` O `end_date`, no ambos.
 

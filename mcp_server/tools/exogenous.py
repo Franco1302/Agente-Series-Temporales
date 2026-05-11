@@ -16,6 +16,9 @@ from mcp_server.instance import mcp
 _SETTINGS = load_settings()
 
 _RELATION_TO_ENDPOINT: dict[str, str] = {
+    # Mapea el tipo de relacion solicitado al endpoint del backend MCP.
+    # El backend expone rutas bajo /Variables/* y cada una implementa
+    # una tecnica distinta para crear la variable exogena.
     "pca": "/Variables/PCA",
     "correlation": "/Variables/Correlacion",
     "covariance": "/Variables/Covarianza",
@@ -25,6 +28,7 @@ _RELATION_TO_ENDPOINT: dict[str, str] = {
 
 
 class CreateExogenousVariableInput(BaseModel):
+    """Esquema de entrada normalizado para crear una variable exogena."""
     file_path: str
     index_column: str
     new_column_name: str
@@ -34,6 +38,13 @@ class CreateExogenousVariableInput(BaseModel):
 
 
 def _build_query_params(inp: CreateExogenousVariableInput) -> dict:
+    """Construye los parametros que espera el backend segun la relacion.
+
+    - Base comun: indice y nombre de la nueva columna.
+    - Linear: requiere slope/intercept como `a` y `b`.
+    - Polynomial: lista de coeficientes en `a`.
+    - PCA/correlation/covariance: solo base comun.
+    """
     base: dict = {"indice": inp.index_column, "columna": inp.new_column_name}
     if inp.relation == "linear":
         coefs = inp.coefficients or []
@@ -71,12 +82,25 @@ async def create_exogenous_variable(
     ] = None,
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = False,
 ) -> dict:
-    """Añade una nueva columna sintética al CSV calculada a partir de las existentes.
+    """Añade una nueva columna sintetica al CSV calculada a partir de las existentes.
 
-    USA cuando el usuario quiera enriquecer un dataset con variables derivadas
-    para mejorar el rendimiento de un modelo predictivo, especialmente SARIMAX.
+    Flujo real del MCP para esta herramienta:
+    1) Se valida y normaliza la entrada con Pydantic.
+    2) Se resuelve el endpoint MCP segun la relacion solicitada.
+    3) Se sube el CSV como multipart al backend con los parametros adecuados.
+    4) Se guarda la respuesta (CSV) en el workspace.
+    5) Si `with_plot=True`, se llama a /Plot{endpoint} y se persiste el PNG.
 
-    Devuelve: output_path, new_column_name, relation_used, image_path, summary.
+    Usa esta herramienta cuando el usuario quiera enriquecer un dataset con
+    variables derivadas para mejorar el rendimiento de un modelo predictivo
+    (por ejemplo, SARIMAX).
+
+    Devuelve un dict con:
+    - output_path: ruta del CSV generado.
+    - new_column_name: nombre de la columna creada.
+    - relation_used: relacion aplicada.
+    - image_path: ruta del PNG (si se genero).
+    - summary: descripcion breve del resultado.
     """
     try:
         inp = CreateExogenousVariableInput(

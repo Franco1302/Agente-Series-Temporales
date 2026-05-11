@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import re
+import json
 import uuid
 from pathlib import Path
 from typing import cast
@@ -151,6 +151,7 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
     }
 
     final_response = ""
+    tool_messages: list[ToolMessage] = []
 
     with st.status("Procesando tu petición…", expanded=True) as status:
         try:
@@ -181,6 +182,7 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
                     for msg in messages_out:
                         if isinstance(msg, ToolMessage):
                             status.write(f"Ejecutando herramienta: **{msg.name}**…")
+                            tool_messages.append(msg)
 
                 elif node_name == "solicitar_parametros":
                     for msg in messages_out:
@@ -205,36 +207,73 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
             status.update(label="❌ Error de conexión", state="error", expanded=True)
             raise exc
 
-    _render_generated_artifacts(final_response, csv_path)
+    artifacts = _collect_tool_artifacts(tool_messages, csv_path)
+    _render_generated_artifacts(artifacts)
     return final_response
 
 
 # ── Auto-render de artefactos generados por las tools MCP ──────────────────
 
-_ARTIFACT_PATH_PATTERN = re.compile(r"[\w./\-]*data[/\\]temp_uploads[/\\][\w\-./\\]+?\.(?:png|csv)")
+_ARTIFACT_KEYS = ("output_path", "image_path")
 
 
-def _render_generated_artifacts(response_text: str, csv_path: str | None) -> None:
-    """Busca rutas a PNG/CSV en el texto del agente y las renderiza en Streamlit.
+def _collect_tool_artifacts(
+    tool_messages: list[ToolMessage], csv_path: str | None
+) -> list[Path]:
+    """Extrae rutas a PNG/CSV de los ToolMessage emitidos por las tools MCP.
 
-    Las tools MCP escriben sus salidas (CSV de series generadas, PNG de gráficas)
-    bajo `data/temp_uploads/` y devuelven la ruta como string al LLM. Esta función
-    detecta esas rutas en la respuesta final y muestra el contenido inline.
+    Las tools devuelven dicts del tipo {"output_path": "...", "image_path": "..."}
+    que LangGraph serializa a JSON en ToolMessage.content. Esta función parsea
+    ese JSON y filtra rutas que apunten dentro de data/temp_uploads/.
     """
-    if not response_text:
-        return
+    seen: set[Path] = set()
+    ordered: list[Path] = []
 
-    paths = set(_ARTIFACT_PATH_PATTERN.findall(response_text))
-    if csv_path:
-        paths.discard(csv_path)
+    for msg in tool_messages:
+        raw = msg.content
+        if not raw:
+            continue
 
-    for raw in paths:
-        p = Path(raw)
+        payload: dict | None = None
+        if isinstance(raw, dict):
+            payload = raw
+        else:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    payload = parsed
+            except (json.JSONDecodeError, TypeError):
+                payload = None
+
+        if payload is None:
+            continue
+
+        for key in _ARTIFACT_KEYS:
+            value = payload.get(key)
+            if not isinstance(value, str) or not value:
+                continue
+            if csv_path and value == csv_path:
+                continue  # no re-render el CSV original subido por el usuario
+            path = Path(value)
+            if "temp_uploads" not in path.parts:
+                continue
+            if path in seen:
+                continue
+            seen.add(path)
+            ordered.append(path)
+
+    return ordered
+
+
+def _render_generated_artifacts(artifacts: list[Path]) -> None:
+    """Renderiza inline cada PNG (st.image) y CSV (preview + descarga)."""
+    for p in artifacts:
         if not p.exists():
             continue
-        if p.suffix.lower() == ".png":
+        suffix = p.suffix.lower()
+        if suffix == ".png":
             st.image(str(p), caption=p.name, use_container_width=True)
-        elif p.suffix.lower() == ".csv":
+        elif suffix == ".csv":
             with st.expander(f"Vista previa: {p.name}"):
                 try:
                     import pandas as pd

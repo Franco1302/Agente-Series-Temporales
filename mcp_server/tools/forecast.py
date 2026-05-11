@@ -16,12 +16,14 @@ from mcp_server.instance import mcp
 _SETTINGS = load_settings()
 
 _MODEL_TO_DATOS: dict[str, str] = {
+    # Endpoints MCP que generan el CSV de prediccion segun el modelo.
     "sarimax": "/Datos/Sarimax",
     "prophet": "/Datos/Prophet",
     "forecaster_autoreg": "/Datos/ForecasterAutoreg",
 }
 
 _MODEL_TO_ERROR: dict[str, str] = {
+    # Endpoints MCP que devuelven metricas de error del modelo.
     "sarimax": "/Error/Sarimax",
     "prophet": "/Error/Prophet",
     "forecaster_autoreg": "/Error/ForecasterAutoreg",
@@ -29,6 +31,7 @@ _MODEL_TO_ERROR: dict[str, str] = {
 
 
 class ForecastTimeSeriesInput(BaseModel):
+    """Esquema de entrada normalizado para la prediccion de series."""
     file_path: str
     index_column: str
     target_column: str
@@ -41,6 +44,11 @@ class ForecastTimeSeriesInput(BaseModel):
 
 
 def _datos_params(inp: ForecastTimeSeriesInput) -> dict:
+    """Construye los parametros para el endpoint /Datos segun el modelo.
+
+    - Siempre envia indice, frecuencia y tamaño del horizonte.
+    - Para forecaster_autoreg incluye el nombre del regresor.
+    """
     base: dict = {"indice": inp.index_column, "freq": inp.frequency, "size": inp.forecast_steps}
     if inp.model == "forecaster_autoreg":
         base["regresor"] = inp.regressor or "RandomForestRegressor"
@@ -48,6 +56,11 @@ def _datos_params(inp: ForecastTimeSeriesInput) -> dict:
 
 
 def _error_params(inp: ForecastTimeSeriesInput) -> dict:
+    """Construye los parametros para el endpoint /Error segun el modelo.
+
+    - No incluye el horizonte, solo metadatos del indice.
+    - Para forecaster_autoreg incluye el nombre del regresor.
+    """
     base: dict = {"indice": inp.index_column, "freq": inp.frequency}
     if inp.model == "forecaster_autoreg":
         base["regresor"] = inp.regressor or "RandomForestRegressor"
@@ -81,10 +94,17 @@ async def forecast_time_series(
     return_metrics: Annotated[bool, Field(description="Si True, también devuelve métricas de error.")] = True,
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG con la predicción.")] = False,
 ) -> dict:
-    """Entrena un modelo predictivo y devuelve un horizonte de predicción.
+    """Entrena un modelo predictivo y devuelve un horizonte de prediccion.
 
     USA cuando el usuario quiera estimar el comportamiento futuro de una serie,
     comparar modelos predictivos o evaluar el error de un modelo concreto.
+
+    Flujo MCP:
+    1) Normaliza la entrada con Pydantic.
+    2) Selecciona endpoints /Datos y /Error segun el modelo.
+    3) Sube el CSV como multipart y guarda el CSV de prediccion.
+    4) Si `return_metrics=True`, solicita el endpoint de error y parsea JSON.
+    5) Si `with_plot=True`, solicita /Plot{datos_endpoint} y guarda el PNG.
 
     Devuelve: output_path, metrics (si return_metrics), model_used, image_path, summary.
     """

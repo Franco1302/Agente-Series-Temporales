@@ -25,6 +25,7 @@ _STRATEGY_TO_ENDPOINT: dict[str, str] = {
 
 
 class AugmentTimeSeriesInput(BaseModel):
+    """Esquema de entrada normalizado para la herramienta de aumentacion."""
     file_path: str
     index_column: str
     strategy: Literal["normal", "muller", "duplicate", "harmonic", "statistical"]
@@ -37,7 +38,12 @@ class AugmentTimeSeriesInput(BaseModel):
 
 
 def _build_query_params(inp: AugmentTimeSeriesInput) -> dict:
-    """Mapea el schema a los params reales del endpoint según la estrategia."""
+    """Construye los parametros esperados por el backend segun la estrategia.
+
+    - Siempre incluye el indice y la frecuencia para alinear el eje temporal.
+    - Algunas estrategias reciben `size` directamente (normal, muller, harmonic).
+    - Otras usan nombres distintos (duplicate: factores de ruido; statistical: tipo).
+    """
     base = {"indice": inp.index_column, "freq": inp.frequency}
     if inp.strategy in {"normal", "muller", "harmonic"}:
         return {**base, "size": inp.size}
@@ -90,12 +96,20 @@ async def augment_time_series(
     ] = None,
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = False,
 ) -> dict:
-    """Genera observaciones adicionales para un CSV existente preservando sus estadísticos.
+    """Genera observaciones adicionales para un CSV existente preservando estadisticos.
 
-    USA cuando el usuario tenga pocos datos y necesite ampliar el dataset para
-    entrenar un modelo predictivo de forma más estable.
+    Flujo principal:
+    1) Normaliza y valida los parametros con un schema Pydantic.
+    2) Resuelve el endpoint segun la estrategia y arma los query params.
+    3) Abre el CSV, lo sube al backend y guarda la respuesta como un nuevo CSV.
+    4) Si `with_plot=True`, solicita el PNG asociado y lo persiste en disco.
 
-    Devuelve: output_path, new_rows, strategy_used, image_path, summary.
+    Devuelve un dict con:
+    - output_path: ruta del CSV generado.
+    - new_rows: cantidad de filas nuevas solicitadas.
+    - strategy_used: estrategia aplicada.
+    - image_path: ruta del PNG (si se genero).
+    - summary: descripcion breve del resultado.
     """
     try:
         inp = AugmentTimeSeriesInput(
