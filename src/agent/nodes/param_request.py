@@ -6,38 +6,71 @@ from langchain_core.messages import AIMessage
 
 from src.agent.state import AgentState
 
-# Mismos parámetros obligatorios que en el antiguo param_validation.py.
-# Los parámetros con valor por defecto en la firma de la herramienta no se incluyen.
+# Parámetros obligatorios por herramienta. Los Optional/con default de la firma
+# Pydantic NO se incluyen aquí — solo lo que la tool no puede ejecutarse sin.
 TOOL_REQUIRED_PARAMS: dict[str, list[str]] = {
-    "detect_drift_kolmogorov_smirnov": ["file_path", "reference_column"],
-    "generate_synthetic_series": [
-        "start_date",
-        "periods",
-        "frequency",
-        "distribution_type",
-        "distribution_params",
+    "generate_synthetic_distribution": [
+        "start_date", "frequency", "distribution_type", "distribution_params",
     ],
-    "augment_data_linear_relation": [
-        "file_path",
-        "index_column",
-        "new_column_name",
-        "slope",
-        "intercept",
+    "generate_synthetic_arma": [
+        "start_date", "frequency",
+    ],
+    "generate_synthetic_periodic": [
+        "start_date", "frequency", "period_length", "pattern_type",
+        "distribution_type", "distribution_params",
+    ],
+    "generate_synthetic_trend": [
+        "start_date", "frequency", "trend_type", "trend_params",
+    ],
+    "detect_drift": ["file_path", "index_column", "method"],
+    "augment_time_series": [
+        "file_path", "index_column", "strategy", "size", "frequency",
+    ],
+    "create_exogenous_variable": [
+        "file_path", "index_column", "new_column_name", "relation",
+    ],
+    "forecast_time_series": [
+        "file_path", "index_column", "target_column", "model", "forecast_steps",
     ],
 }
 
 _PARAM_DESCRIPTIONS: dict[str, str] = {
+    # Comunes
     "file_path": "la ruta al fichero CSV",
-    "reference_column": "el nombre de la columna a analizar",
-    "start_date": "la fecha de inicio en formato YYYY-MM-DD (ej. 2023-01-01)",
-    "periods": "el número de periodos a generar (número entero positivo)",
-    "frequency": "la frecuencia temporal: 'D' (diaria), 'W' (semanal), 'M' (mensual), 'H' (horaria)",
-    "distribution_type": "el tipo de distribución: 0=Normal, 1=Uniforme, 2=Poisson, 3=Exponencial",
-    "distribution_params": "los parámetros de la distribución como lista (ej. [0.0, 1.0] para Normal)",
-    "index_column": "el nombre de la columna existente que actuará como variable independiente",
+    "index_column": "el nombre de la columna que actúa como índice temporal del CSV",
+    "start_date": "la fecha de inicio en formato YYYY-MM-DD (ej. 2024-01-01)",
+    "frequency": "la frecuencia temporal: 'D' (diaria), 'W' (semanal), 'M' (mensual), 'h' (horaria), 'min' o 's'",
+    # Distribución
+    "distribution_type": (
+        "el código de distribución (1=Normal, 2=Binomial, 3=Poisson, 4=Geométrica, "
+        "7=Uniforme, 9=Exponencial, 10=Gamma, 11=Beta, 17=Aleatorio, etc.)"
+    ),
+    "distribution_params": "los parámetros de la distribución como lista (ej. [0.0, 1.0] para Normal mu=0 sigma=1)",
+    # Periódica
+    "period_length": "cada cuántas observaciones se repite el patrón (entero positivo)",
+    "pattern_type": "tipo de patrón cíclico: 1=variación de amplitud, 2=variación de cantidad de elementos",
+    # Tendencia
+    "trend_type": "el código del tipo de tendencia (lineal, polinómica, exponencial, etc.)",
+    "trend_params": "los coeficientes que definen la tendencia como lista de números",
+    # Drift
+    "method": (
+        "el método de detección de drift: KS (Kolmogorov-Smirnov), JS (Jensen-Shannon), "
+        "PSI (Population Stability Index), CUSUM, MEWMA o HOTELLING"
+    ),
+    # Augmentación
+    "strategy": (
+        "la estrategia de aumentación: 'normal', 'muller', 'duplicate', 'harmonic' o 'statistical'"
+    ),
+    "size": "el número de observaciones nuevas a generar (entero positivo)",
+    # Exógenas
     "new_column_name": "el nombre de la nueva columna que se creará",
-    "slope": "la pendiente de la relación lineal (número decimal)",
-    "intercept": "el término independiente de la relación lineal (número decimal)",
+    "relation": (
+        "el tipo de relación: 'pca', 'correlation', 'covariance', 'linear' o 'polynomial'"
+    ),
+    # Forecast
+    "target_column": "el nombre de la columna a predecir",
+    "model": "el modelo predictivo: 'sarimax', 'prophet' o 'forecaster_autoreg'",
+    "forecast_steps": "el número de pasos futuros a predecir (entero positivo)",
 }
 
 

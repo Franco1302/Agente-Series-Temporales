@@ -39,37 +39,54 @@ COMPORTAMIENTO:
 """
 
 _TOOLS_BLOCK = """\
-HERRAMIENTAS DISPONIBLES:
+HERRAMIENTAS:
 
-1. detect_drift_kolmogorov_smirnov
-   - Cuándo usarla: cuando el usuario quiera detectar si una columna de su CSV ha
-     cambiado de distribución respecto a un periodo de referencia.
-   - Parámetros obligatorios: file_path (ruta al CSV), reference_column (nombre columna).
-   - Parámetro opcional: threshold (nivel de significancia, por defecto 0.05).
+1. generate_synthetic_distribution — Genera datos siguiendo una distribución estadística
+   (Normal, Poisson, Beta, Gamma, Uniforme...). Triggers: "datos sintéticos", "serie aleatoria",
+   "distribución X". Requiere: start_date, frequency, distribution_type (1-17),
+   distribution_params. Pasa periods O end_date, no ambos.
 
-2. generate_synthetic_series
-   - Cuándo usarla: cuando el usuario quiera crear una serie temporal sintética
-     con parámetros estadísticos concretos (distribución, frecuencia, fechas).
-   - Parámetros obligatorios: start_date (formato YYYY-MM-DD), periods (número de
-     periodos), frequency ('D', 'W', 'M', 'H' o 'T'), distribution_type (0=Normal,
-     1=Uniforme, 2=Poisson, 3=Exponencial), distribution_params (lista de parámetros
-     de la distribución).
+2. generate_synthetic_arma — Genera serie con autocorrelación temporal (AR/MA/ARMA).
+   Triggers: "ARMA", "AR(p)", "autocorrelación", "memoria temporal".
+   Requiere: start_date, frequency. Opcionales: ar_coefficients, ma_coefficients.
 
-3. augment_data_linear_relation
-   - Cuándo usarla: cuando el usuario quiera añadir una nueva columna a su CSV
-     calculada como una relación lineal de otra columna ya existente.
-   - Parámetros obligatorios: file_path, index_column (columna base), new_column_name
-     (nombre de la nueva columna), slope (pendiente), intercept (término independiente).
+3. generate_synthetic_periodic — Genera serie con patrones cíclicos (estacionalidad).
+   Triggers: "estacional", "cíclica", "patrón repetido cada N".
+   Requiere: start_date, frequency, period_length, pattern_type, distribution_type,
+   distribution_params.
 
-4. consultar_teoria
-   - Cuándo usarla: SIEMPRE que el usuario pregunte sobre conceptos teóricos —
-     qué es el data drift, cómo funciona un test estadístico, qué significa un
-     p-valor, diferencias entre distribuciones, fundamentos de series temporales, etc.
-     No respondas de memoria en estos casos: DEBES invocar esta herramienta para
-     ofrecer una respuesta fundamentada en la documentación del proyecto.
-   - Parámetro obligatorio: query (la pregunta del usuario en lenguaje natural).
-   - IMPORTANTE: no usar esta herramienta para analizar datos concretos del usuario;
-     para eso están las herramientas 1-3.
+4. generate_synthetic_trend — Genera serie con tendencia determinista.
+   Triggers: "tendencia", "creciente", "decreciente lineal/polinómico/exponencial".
+   Requiere: start_date, frequency, trend_type, trend_params.
+
+5. detect_drift — Detecta cambio de distribución en un CSV.
+   Triggers: "drift", "ha cambiado", "estabilidad de los datos".
+   Requiere: file_path, index_column, method ∈ {KS, JS, PSI, CUSUM, MEWMA, HOTELLING}.
+   Univariantes: KS, JS, PSI, CUSUM. Multivariantes: MEWMA, HOTELLING.
+
+6. augment_time_series — Amplía un CSV con observaciones nuevas.
+   Triggers: "aumentar datos", "más observaciones", "ampliar dataset".
+   Requiere: file_path, index_column, strategy ∈ {normal, muller, duplicate,
+   harmonic, statistical}, size, frequency.
+
+7. create_exogenous_variable — Añade columna derivada al CSV.
+   Triggers: "variable exógena", "nueva columna", "PCA", "correlación".
+   Requiere: file_path, index_column, new_column_name, relation ∈
+   {pca, correlation, covariance, linear, polynomial}.
+
+8. forecast_time_series — Predice horizonte futuro de una serie.
+   Triggers: "predecir", "forecast", "futuro", "SARIMAX", "Prophet".
+   Requiere: file_path, index_column, target_column, model ∈
+   {sarimax, prophet, forecaster_autoreg}, forecast_steps.
+
+9. consultar_teoria — SIEMPRE para preguntas teóricas (qué es drift, ARMA, p-valor,
+   diferencias entre tests, fundamentos de series temporales). No respondas de
+   memoria; usa esta herramienta. Requiere: query.
+
+REGLAS:
+- Si la tool requiere file_path y no hay CSV cargado: pide al usuario que lo suba.
+- No inventes parámetros opcionales: si dudas, omítelos del JSON.
+- Para preguntas teóricas usa SIEMPRE consultar_teoria, nunca respondas de memoria.
 """
 
 _FILE_CONTEXT_TEMPLATE = """\
