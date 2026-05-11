@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from pathlib import Path
 from typing import cast
@@ -204,7 +205,49 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
             status.update(label="❌ Error de conexión", state="error", expanded=True)
             raise exc
 
+    _render_generated_artifacts(final_response, csv_path)
     return final_response
+
+
+# ── Auto-render de artefactos generados por las tools MCP ──────────────────
+
+_ARTIFACT_PATH_PATTERN = re.compile(r"[\w./\-]*data[/\\]temp_uploads[/\\][\w\-./\\]+?\.(?:png|csv)")
+
+
+def _render_generated_artifacts(response_text: str, csv_path: str | None) -> None:
+    """Busca rutas a PNG/CSV en el texto del agente y las renderiza en Streamlit.
+
+    Las tools MCP escriben sus salidas (CSV de series generadas, PNG de gráficas)
+    bajo `data/temp_uploads/` y devuelven la ruta como string al LLM. Esta función
+    detecta esas rutas en la respuesta final y muestra el contenido inline.
+    """
+    if not response_text:
+        return
+
+    paths = set(_ARTIFACT_PATH_PATTERN.findall(response_text))
+    if csv_path:
+        paths.discard(csv_path)
+
+    for raw in paths:
+        p = Path(raw)
+        if not p.exists():
+            continue
+        if p.suffix.lower() == ".png":
+            st.image(str(p), caption=p.name, use_container_width=True)
+        elif p.suffix.lower() == ".csv":
+            with st.expander(f"Vista previa: {p.name}"):
+                try:
+                    import pandas as pd
+                    df = pd.read_csv(p, nrows=20)
+                    st.dataframe(df, use_container_width=True)
+                    st.download_button(
+                        label=f"Descargar {p.name}",
+                        data=p.read_bytes(),
+                        file_name=p.name,
+                        mime="text/csv",
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    st.warning(f"No se pudo previsualizar {p.name}: {exc}")
 
 
 # ── Bucle principal ─────────────────────────────────────────────────────────
