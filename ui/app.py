@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import cast
 
+import pandas as pd
 import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -38,11 +39,36 @@ def _get_csv_path() -> str | None:
     return cast(str | None, st.session_state.get("csv_path"))
 
 
+def _get_csv_metadata() -> dict | None:
+    """Devuelve las columnas/filas/dtypes del CSV activo si están en sesión."""
+    return cast(dict | None, st.session_state.get("csv_metadata"))
+
+
+def _compute_csv_metadata(csv_path: str) -> dict | None:
+    """Lee la cabecera + dtypes del CSV para que el LLM conozca las columnas reales.
+
+    Sin esta info el modelo inventa nombres de columna (`fecha_index`, etc.)
+    y la API responde 400. Hacer un read_csv completo es asumible: los CSVs
+    de la UI son pequeños y solo se ejecuta una vez al subir el fichero.
+    """
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception:  # noqa: BLE001 — si falla, mejor seguir sin metadata
+        return None
+    return {
+        "columns": [str(c) for c in df.columns],
+        "rows": len(df),
+        "dtypes": {str(c): str(df[c].dtype) for c in df.columns},
+    }
+
+
 def _reset_chat_state() -> None:
     """Reinicia el historial y genera un nuevo thread_id para la sesión."""
     st.session_state["chat_history"] = []
     # Nuevo thread_id = nueva conversación limpia en MemorySaver
     st.session_state["thread_id"] = str(uuid.uuid4())
+    # csv_path / csv_metadata se conservan a propósito: el usuario suele
+    # querer mantener su fichero activo entre conversaciones.
 
 
 # ── Gestión del fichero CSV ─────────────────────────────────────────────────
@@ -92,10 +118,14 @@ def _render_sidebar() -> None:
     if uploaded_file is not None:
         saved_path = _save_uploaded_file(uploaded_file)
         st.session_state["csv_path"] = saved_path
+        st.session_state["csv_metadata"] = _compute_csv_metadata(saved_path)
         file_size_kb = Path(saved_path).stat().st_size / 1024
+        meta = _get_csv_metadata()
+        cols_preview = ", ".join(meta["columns"]) if meta else "?"
         st.sidebar.success(
             f"**{uploaded_file.name}** cargado  \n"
-            f"{file_size_kb:.1f} KB · `{saved_path}`"
+            f"{file_size_kb:.1f} KB · `{saved_path}`  \n"
+            f"Columnas: `{cols_preview}`"
         )
     elif _get_csv_path():
         active_path = _get_csv_path()
@@ -147,6 +177,7 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
     input_state = {
         "messages": [HumanMessage(content=user_prompt)],
         "csv_path": csv_path,
+        "csv_metadata": _get_csv_metadata(),
         "error_count": 0,
     }
 
