@@ -49,3 +49,6 @@ data/**/*
 !data/**/
 !data/**/.gitkeep
 CLAUDE.md
+*.md
+requirements_benchmark.txt
+requirements-dev.txt
