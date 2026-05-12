@@ -29,6 +29,7 @@ class OllamaSettings:
     model: str
     temperature: float
     request_timeout: float
+    num_ctx: int
 
 
 def _read_required_env(variable_name: str, default_value: str | None = None) -> str:
@@ -61,6 +62,10 @@ def load_ollama_settings() -> OllamaSettings:
     model = _read_required_env("OLLAMA_MODEL", "llama3.1")
     temperature = _read_float_env("OLLAMA_TEMPERATURE", 0.2)
     request_timeout = _read_float_env("OLLAMA_REQUEST_TIMEOUT", 8.0)
+    # El default de Ollama (2048) es insuficiente para nuestro system prompt (~5k chars)
+    # + esquemas de las 9 tools. Con num_ctx pequeño el modelo trunca y devuelve vacío.
+    num_ctx_raw = os.getenv("OLLAMA_NUM_CTX")
+    num_ctx = int(num_ctx_raw) if num_ctx_raw and num_ctx_raw.strip().isdigit() else 8192
 
     if not 0.0 <= temperature <= 2.0:
         raise ValueError("OLLAMA_TEMPERATURE debe estar entre 0.0 y 2.0.")
@@ -68,11 +73,15 @@ def load_ollama_settings() -> OllamaSettings:
     if request_timeout <= 0:
         raise ValueError("OLLAMA_REQUEST_TIMEOUT debe ser mayor que 0.")
 
+    if num_ctx <= 0:
+        raise ValueError("OLLAMA_NUM_CTX debe ser un entero positivo.")
+
     return OllamaSettings(
         base_url=base_url,
         model=model,
         temperature=temperature,
         request_timeout=request_timeout,
+        num_ctx=num_ctx,
     )
 
 
@@ -103,6 +112,7 @@ def get_chat_ollama() -> ChatOllama:
             model=settings.model,
             base_url=settings.base_url,
             temperature=settings.temperature,
+            num_ctx=settings.num_ctx,
         )
     except Exception as exc:
         raise RuntimeError(

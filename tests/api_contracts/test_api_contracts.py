@@ -70,7 +70,7 @@ async def test_drift_ks_detects_on_trend(trend_csv_path: str):
     """Una serie con tendencia clara debe producir drift_label='Detectado' con KS."""
     out = await detect_drift(
         file_path=trend_csv_path,
-        index_column="ts",
+        index_column="Indice",
         method="KS",
         threshold=0.05,
     )
@@ -93,7 +93,7 @@ async def test_drift_ks_no_drift_on_stable(stable_csv_path: str):
     """
     out = await detect_drift(
         file_path=stable_csv_path,
-        index_column="ts",
+        index_column="Indice",
         method="KS",
         threshold=0.01,
     )
@@ -111,7 +111,7 @@ async def test_drift_method_routing(trend_csv_path: str):
     for method, threshold in (("KS", 0.05), ("JS", 0.2), ("PSI", 0.25)):
         out = await detect_drift(
             file_path=trend_csv_path,
-            index_column="ts",
+            index_column="Indice",
             method=method,  # type: ignore[arg-type]
             threshold=threshold,
         )
@@ -125,7 +125,7 @@ async def test_drift_error_on_missing_file():
     """Contrato de error: fichero inexistente devuelve dict con clave 'error'."""
     out = await detect_drift(
         file_path="/tmp/no_existe_ABCXYZ_unique.csv",
-        index_column="ts",
+        index_column="Indice",
         method="KS",
     )
     assert "error" in out
@@ -140,7 +140,7 @@ async def test_augment_extends_csv(stable_csv_path: str):
     """augment normal con size=50 produce un CSV con más filas que el original."""
     out = await augment_time_series(
         file_path=stable_csv_path,
-        index_column="ts",
+        index_column="Indice",
         strategy="normal",
         size=50,
         frequency="D",
@@ -164,7 +164,7 @@ async def test_exogenous_linear_adds_column(stable_csv_path: str):
     """Relación lineal añade una columna nueva con el nombre solicitado."""
     out = await create_exogenous_variable(
         file_path=stable_csv_path,
-        index_column="ts",
+        index_column="Indice",
         new_column_name="valor_lineal",
         relation="linear",
         coefficients=[2.0, 3.0],
@@ -188,7 +188,7 @@ async def test_forecast_sarimax_on_periodic(periodic_csv_path: str):
     forecast_steps = 30
     out = await forecast_time_series(
         file_path=periodic_csv_path,
-        index_column="ts",
+        index_column="Indice",
         target_column="valor",
         model="sarimax",
         forecast_steps=forecast_steps,

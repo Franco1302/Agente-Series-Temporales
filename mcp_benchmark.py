@@ -21,6 +21,8 @@ except ImportError:
     print("  pip install -r requirements_benchmark.txt")
     sys.exit(1)
 
+from scripts._scoring_utils import evaluar_tool_call as _evaluar_tool_call
+
 
 # ── Configuración ─────────────────────────────────────────────────────────────
 
@@ -220,7 +222,11 @@ def _normalizar(valor):
 
 
 def evaluar_tool_call(tool_calls, caso: dict) -> dict:
-    """Evalúa si el tool call cumple los criterios del caso de prueba."""
+    """Evalúa si el tool call cumple los criterios del caso de prueba.
+
+    Adapta la forma Ollama (`call.function.name/arguments`) al evaluador
+    genérico de `scripts/_scoring_utils.py`.
+    """
     if not tool_calls:
         return {
             "herramienta_invocada": None,
@@ -229,11 +235,9 @@ def evaluar_tool_call(tool_calls, caso: dict) -> dict:
             "precision_args_pct": 0.0,
         }
 
-    # Tomar el primer tool call (ReAct espera uno por turno)
     call = tool_calls[0]
     nombre_tool = getattr(call.function, "name", None)
 
-    # Extraer argumentos
     args_raw = getattr(call.function, "arguments", {})
     if isinstance(args_raw, str):
         try:
@@ -243,25 +247,18 @@ def evaluar_tool_call(tool_calls, caso: dict) -> dict:
     else:
         args = args_raw or {}
 
-    herramienta_correcta = nombre_tool == caso["herramienta_esperada"]
-
-    # Verificar args requeridos presentes
-    requeridos = caso["args_requeridos"]
-    presentes = all(k in args for k in requeridos)
-
-    # Precisión de valores
-    esperados = caso["valores_esperados"]
-    aciertos = sum(
-        1 for k, v in esperados.items()
-        if k in args and _normalizar(args[k]) == _normalizar(v)
+    eval_dict = _evaluar_tool_call(
+        nombre_invocado=nombre_tool,
+        args_obtenidos=args,
+        nombre_esperado=caso["herramienta_esperada"],
+        args_requeridos=caso["args_requeridos"],
+        valores_esperados=caso["valores_esperados"],
     )
-    precision = round((aciertos / len(esperados)) * 100, 1) if esperados else 0.0
-
     return {
-        "herramienta_invocada": nombre_tool,
-        "herramienta_correcta": herramienta_correcta,
-        "args_requeridos_presentes": presentes,
-        "precision_args_pct": precision,
+        "herramienta_invocada": eval_dict["herramienta_invocada"],
+        "herramienta_correcta": eval_dict["herramienta_correcta"],
+        "args_requeridos_presentes": eval_dict["args_requeridos_presentes"],
+        "precision_args_pct": eval_dict["precision_args_pct"],
     }
 
 

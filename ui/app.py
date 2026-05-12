@@ -223,8 +223,10 @@ def _collect_tool_artifacts(
     """Extrae rutas a PNG/CSV de los ToolMessage emitidos por las tools MCP.
 
     Las tools devuelven dicts del tipo {"output_path": "...", "image_path": "..."}
-    que LangGraph serializa a JSON en ToolMessage.content. Esta función parsea
-    ese JSON y filtra rutas que apunten dentro de data/temp_uploads/.
+    que llegan en `ToolMessage.content` en uno de dos formatos:
+      - LangChain nativo: string JSON con el dict serializado.
+      - MCP (langchain_mcp_adapters): lista de partes
+        `[{"type": "text", "text": "{...}"}]`.
     """
     seen: set[Path] = set()
     ordered: list[Path] = []
@@ -237,13 +239,27 @@ def _collect_tool_artifacts(
         payload: dict | None = None
         if isinstance(raw, dict):
             payload = raw
-        else:
+        elif isinstance(raw, str):
             try:
                 parsed = json.loads(raw)
                 if isinstance(parsed, dict):
                     payload = parsed
             except (json.JSONDecodeError, TypeError):
                 payload = None
+        elif isinstance(raw, list):
+            for part in raw:
+                if not isinstance(part, dict):
+                    continue
+                text = part.get("text")
+                if not isinstance(text, str):
+                    continue
+                try:
+                    parsed = json.loads(text)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if isinstance(parsed, dict):
+                    payload = parsed
+                    break
 
         if payload is None:
             continue

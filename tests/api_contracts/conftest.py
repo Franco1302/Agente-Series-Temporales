@@ -143,8 +143,8 @@ def trend_csv_path(session_workspace: Path) -> str:
             start_date="2024-01-01",
             periods=200,
             frequency="D",
-            trend_type=1,  # lineal
-            trend_params=[0.1, 0.0],  # slope=0.1, intercept=0
+            trend_type=1,  # lineal: valor = intercept + slope*i
+            trend_params=[0.0, 0.1],  # [intercept, slope] → 0 a 20 sobre 200 pasos
             noise=0.5,
             column_name="valor",
         )

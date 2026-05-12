@@ -1,99 +1,329 @@
-"""Script de prueba end-to-end del grafo LangGraph desde terminal.
+"""Pruebas end-to-end del agente LangGraph con scoring ponderado.
 
-Ejecutar desde la raíz del proyecto:
-    python -m scripts.test_agent
-    python -m scripts.test_agent --caso 1
-    python -m scripts.test_agent --todos
+Cada caso de prueba se puntua sobre 100 con cuatro criterios:
+    - tool_correcta (40): el agente invoco la tool MCP esperada (o ninguna)
+    - args_correctos (25): los argumentos JSON coinciden con lo esperado
+    - terminos_clave (20): la respuesta natural contiene conceptos esperados
+    - cita_artefactos (15): cuando la tool genera CSV/PNG, el resultado cita
+      `output_path` / `image_path` o un path concreto en `data/temp_uploads/`
+
+Si `genera_artefacto=False`, el criterio de artefactos no aplica y se suma
+automaticamente. El total por caso siempre es sobre 100.
+
+Ejecutar desde la raiz del proyecto:
+    python -m scripts.test_agent                          # casos 1 y 2 por defecto
+    python -m scripts.test_agent --caso 1                 # un caso concreto
+    python -m scripts.test_agent --todos                  # todos los casos
+    python -m scripts.test_agent --todos --csv-out tests/results/agent_scorecard.csv
+
+Requiere: Ollama corriendo + backend MCP en localhost:8017 (las tools MCP se
+ejecutan de verdad contra la API real).
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import csv
+import json
 import sys
 import textwrap
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from scripts._scoring_utils import comparar_args
 from src.agent.graph import build_agent_graph
+
+
+# ── Pesos del scoring por criterio ───────────────────────────────────────────
+
+W_TOOL = 40
+W_ARGS = 25
+W_TERMS = 20
+W_ARTIFACT = 15
+W_TOTAL = W_TOOL + W_ARGS + W_TERMS + W_ARTIFACT  # 100
 
 
 @dataclass
 class TestCase:
-    """Definición de un caso de prueba del agente."""
+    """Definicion de un caso de prueba del agente, con expectativas para scoring."""
 
     nombre: str
     mensaje: str
     csv_path: str | None = None
-    # Términos que deben aparecer en la respuesta final (al menos uno)
-    términos_esperados: list[str] = field(default_factory=list)
-    # Si True, se espera que el agente ejecute al menos una herramienta
-    espera_tool_call: bool = False
+    # Tool MCP esperada; None si NO se debe invocar ninguna tool
+    tool_esperada: str | None = None
+    # Argumentos esperados (subset de lo que el LLM deberia incluir)
+    args_esperados: dict[str, Any] = field(default_factory=dict)
+    # Terminos que deben aparecer en la respuesta final (al menos uno)
+    terminos_esperados: list[str] = field(default_factory=list)
+    # Si True, la tool deberia generar un artefacto (CSV/PNG) que el agente cite
+    genera_artefacto: bool = False
 
 
-# ── Casos de prueba ──────────────────────────────────────────────────────────
+# ── Fixture de CSV real, generado una sola vez desde la propia API ────────────
 
-CASOS: list[TestCase] = [
-    TestCase(
-        nombre="Detección de drift con parámetros completos",
-        mensaje=(
-            "Analiza el drift en el fichero 'data/temp_uploads/ventas.csv' "
-            "sobre la columna 'precio' usando un umbral de 0.05."
+_FIXTURE_CSV_PATH: str | None = None
+
+
+def _build_fixture_csv() -> str:
+    """Genera un CSV real con `generate_synthetic_distribution` y devuelve su path.
+
+    Se llama a la tool MCP por importacion directa (sin pasar por el grafo),
+    asi reutilizamos la logica real y evitamos duplicar generacion en numpy.
+    """
+    global _FIXTURE_CSV_PATH
+    if _FIXTURE_CSV_PATH is not None and Path(_FIXTURE_CSV_PATH).exists():
+        return _FIXTURE_CSV_PATH
+
+    from mcp_server.tools.synthetic import generate_synthetic_distribution
+
+    result = asyncio.run(
+        generate_synthetic_distribution(
+            start_date="2024-01-01",
+            periods=200,
+            frequency="D",
+            distribution_type=1,  # Normal
+            distribution_params=[0.0, 1.0],
+            column_name="valor",
+        )
+    )
+    if "error" in result:
+        raise RuntimeError(f"No se pudo preparar el CSV de prueba: {result['error']}")
+    _FIXTURE_CSV_PATH = result["output_path"]
+    return _FIXTURE_CSV_PATH
+
+
+def _casos() -> list[TestCase]:
+    """Construye la lista de casos. Funcion para diferir la creacion del CSV."""
+    csv_path = _build_fixture_csv()
+    return [
+        # 1. Drift con todos los parametros (camino feliz tool MCP)
+        TestCase(
+            nombre="Deteccion de drift con parametros completos",
+            mensaje=(
+                f"Analiza el drift en el fichero '{csv_path}' usando la columna "
+                f"'Indice' como indice temporal, con el metodo KS y umbral 0.05."
+            ),
+            csv_path=csv_path,
+            tool_esperada="detect_drift",
+            args_esperados={
+                "file_path": csv_path,
+                "index_column": "Indice",
+                "method": "KS",
+                "threshold": 0.05,
+            },
+            terminos_esperados=["drift", "kolmogorov", "ks", "umbral", "0.05", "no detectado", "detectado"],
+            genera_artefacto=False,
         ),
-        csv_path="data/temp_uploads/ventas.csv",
-        términos_esperados=["drift", "p_value", "kolmogorov", "precio", "umbral", "0.05"],
-        espera_tool_call=True,
-    ),
-    TestCase(
-        nombre="Parámetros incompletos — agente pide datos",
-        mensaje="Genera una serie temporal sintética.",
-        csv_path=None,
-        términos_esperados=["start_date", "periods", "frequency", "distribution", "necesito", "proporcion"],
-        espera_tool_call=False,
-    ),
-    TestCase(
-        nombre="Pregunta general sin herramienta",
-        mensaje="¿Qué es el data drift y cuándo debo preocuparme por él?",
-        csv_path=None,
-        términos_esperados=["drift", "distribución", "datos", "modelo"],
-        espera_tool_call=False,
-    ),
-    TestCase(
-        nombre="Augmentación de datos con relación lineal",
-        mensaje=(
-            "Añade una columna llamada 'precio_ajustado' al fichero "
-            "'data/temp_uploads/ventas.csv' usando la columna 'precio' "
-            "con pendiente 1.1 e intercepto 50."
+        # 2. Parametros incompletos -> el agente invoca la tool con args vacios
+        #    y el grafo dispara solicitar_parametros (comportamiento descrito en
+        #    src/agent/prompts/system_prompts.py BEHAVIOR_BLOCK).
+        TestCase(
+            nombre="Parametros incompletos - agente pide datos",
+            mensaje="Genera una serie temporal sintetica.",
+            csv_path=None,
+            tool_esperada="generate_synthetic_distribution",
+            args_esperados={},  # se espera args vacios o muy parciales
+            terminos_esperados=[
+                "start_date", "periods", "frequency", "distribution", "necesito", "proporcion", "datos",
+            ],
+            genera_artefacto=False,
         ),
-        csv_path="data/temp_uploads/ventas.csv",
-        términos_esperados=["augment", "precio_ajustado", "pendiente", "columna", "fichero"],
-        espera_tool_call=True,
-    ),
-    TestCase(
-        nombre="Consulta teórica RAG — Kolmogorov-Smirnov",
-        mensaje="¿Qué es el test de Kolmogorov-Smirnov y para qué sirve en la detección de drift?",
-        csv_path=None,
-        términos_esperados=["kolmogorov", "drift", "distribución"],
-        espera_tool_call=True,  # debe llamar a consultar_teoria
-    ),
-    TestCase(
-        nombre="Recuperación de error de parámetros vacíos",
-        mensaje=(
-            "Analiza el drift en el fichero '' sobre la columna 'precio'."
+        # 3. Pregunta general -> RAG (consultar_teoria es la tool esperada para
+        #    preguntas teoricas; el prompt instruye SIEMPRE usarla).
+        TestCase(
+            nombre="Pregunta general sobre drift",
+            mensaje="Que es el data drift y cuando debo preocuparme por el?",
+            csv_path=None,
+            tool_esperada="consultar_teoria",
+            args_esperados={},
+            terminos_esperados=["drift", "distribucion", "datos", "modelo", "cambio"],
+            genera_artefacto=False,
         ),
-        csv_path=None,
-        términos_esperados=["ruta", "fichero", "necesito", "proporciona"],
-        espera_tool_call=False,  # debe pedir el file_path correcto, no ejecutar
-    ),
-]
+        # 4. Augment - genera un CSV nuevo (artefacto)
+        TestCase(
+            nombre="Aumentacion normal de la serie",
+            mensaje=(
+                f"Aumenta el fichero '{csv_path}' con la estrategia 'normal' "
+                f"anadiendo 50 nuevas observaciones, usando 'Indice' como indice "
+                f"y frecuencia diaria."
+            ),
+            csv_path=csv_path,
+            tool_esperada="augment_time_series",
+            args_esperados={
+                "file_path": csv_path,
+                "index_column": "Indice",
+                "strategy": "normal",
+                "size": 50,
+                "frequency": "D",
+            },
+            terminos_esperados=["augment", "aument", "filas", "csv", "observaciones"],
+            genera_artefacto=True,
+        ),
+        # 5. RAG - consulta teorica
+        TestCase(
+            nombre="Consulta teorica RAG - Kolmogorov-Smirnov",
+            mensaje="Que es el test de Kolmogorov-Smirnov y para que sirve en la deteccion de drift?",
+            csv_path=None,
+            tool_esperada="consultar_teoria",
+            args_esperados={},  # query libre, solo verificamos que se llame la tool
+            terminos_esperados=["kolmogorov", "drift", "distribu"],
+            genera_artefacto=False,
+        ),
+        # 6. Recuperacion de error: file_path vacio -> el agente invoca
+        #    detect_drift con file_path vacio y el validador dispara
+        #    solicitar_parametros para pedir la ruta.
+        TestCase(
+            nombre="Recuperacion de error de parametros vacios",
+            mensaje="Analiza el drift en el fichero '' sobre la columna 'valor'.",
+            csv_path=None,
+            tool_esperada="detect_drift",
+            args_esperados={},
+            terminos_esperados=["ruta", "fichero", "necesito", "proporcion", "file_path"],
+            genera_artefacto=False,
+        ),
+        # 7. Generacion sintetica con grafica - artefacto PNG
+        TestCase(
+            nombre="Generacion sintetica con grafica (PNG)",
+            mensaje=(
+                "Genera una serie temporal sintetica con distribucion normal "
+                "(mu=0, sigma=1) empezando el 2024-01-01, con 100 periodos diarios, "
+                "y dame ademas la grafica."
+            ),
+            csv_path=None,
+            tool_esperada="generate_synthetic_distribution",
+            args_esperados={
+                "start_date": "2024-01-01",
+                "frequency": "D",
+                "distribution_type": 1,
+                "periods": 100,
+                "with_plot": True,
+            },
+            terminos_esperados=["serie", "generad", "csv", "png", "grafica", "100"],
+            genera_artefacto=True,
+        ),
+        # 8. Forecast SARIMAX - artefacto CSV
+        TestCase(
+            nombre="Forecast SARIMAX sobre la serie",
+            mensaje=(
+                f"Haz un forecast SARIMAX a 30 pasos sobre el fichero '{csv_path}' "
+                f"usando 'Indice' como indice y 'valor' como columna objetivo, "
+                f"con frecuencia diaria."
+            ),
+            csv_path=csv_path,
+            tool_esperada="forecast_time_series",
+            args_esperados={
+                "file_path": csv_path,
+                "index_column": "Indice",
+                "target_column": "valor",
+                "model": "sarimax",
+                "forecast_steps": 30,
+            },
+            terminos_esperados=["forecast", "sarimax", "prediccion", "30", "csv"],
+            genera_artefacto=True,
+        ),
+    ]
 
 
-# ── Lógica de ejecución ──────────────────────────────────────────────────────
+# ── Extraccion de invocaciones de tool desde el stream del grafo ──────────────
 
-def _run_case(caso: TestCase, verbose: bool = True) -> bool:
-    """Ejecuta un caso de prueba y devuelve True si pasa, False si falla."""
-    separador = "─" * 60
+
+def _extract_tool_call_from_messages(messages: list) -> tuple[str | None, dict]:
+    """Devuelve el (nombre, args) de la primera tool_call que aparezca, si la hay."""
+    for msg in messages:
+        if isinstance(msg, AIMessage):
+            tool_calls = getattr(msg, "tool_calls", None) or []
+            for call in tool_calls:
+                if isinstance(call, dict):
+                    return call.get("name"), call.get("args", {}) or {}
+                return getattr(call, "name", None), getattr(call, "args", {}) or {}
+    return None, {}
+
+
+def _decode_tool_message_payload(content: Any) -> dict | None:
+    """Devuelve el dict del ToolMessage soportando los dos formatos habituales.
+
+    - LangChain nativo: `content` es un string JSON con el dict de la tool.
+    - MCP (langchain_mcp_adapters): `content` es una lista de partes
+      `[{"type": "text", "text": "{\"output_path\": ...}"}]`.
+    """
+    if isinstance(content, str):
+        try:
+            payload = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    if isinstance(content, list):
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            text = part.get("text")
+            if not isinstance(text, str):
+                continue
+            try:
+                payload = json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(payload, dict):
+                return payload
+    return None
+
+
+def _artifacts_from_tool_messages(tool_messages: list[ToolMessage]) -> list[str]:
+    """Extrae rutas concretas de artefactos (output_path / image_path) de los ToolMessage."""
+    artifacts: list[str] = []
+    for tm in tool_messages:
+        payload = _decode_tool_message_payload(tm.content)
+        if payload is None:
+            continue
+        for key in ("output_path", "image_path"):
+            value = payload.get(key)
+            if isinstance(value, str) and value:
+                artifacts.append(value)
+    return artifacts
+
+
+def _response_cites_artifact(response: str, artifacts: list[str]) -> bool:
+    """True si la respuesta cita literalmente uno de los paths de artefacto (o su nombre)."""
+    if not response or not artifacts:
+        return False
+    response_l = response.lower()
+    for path in artifacts:
+        if not path:
+            continue
+        if path.lower() in response_l:
+            return True
+        # Tambien aceptamos que cite solo el nombre de fichero (los modelos a
+        # veces resumen sin la ruta completa)
+        name = Path(path).name.lower()
+        if name and name in response_l:
+            return True
+    return False
+
+
+# ── Ejecucion y scoring por caso ──────────────────────────────────────────────
+
+
+@dataclass
+class CaseScore:
+    nombre: str
+    tool_invocada: str | None
+    score_tool: int
+    score_args: int
+    score_terms: int
+    score_artifact: int
+    total: int
+    detalle: str  # mensaje corto explicando aciertos/fallos
+
+
+def _score_case(caso: TestCase, verbose: bool = True) -> CaseScore:
+    """Ejecuta el caso contra el grafo y calcula los 4 sub-scores."""
+    separador = "-" * 60
     print(f"\n{separador}")
     print(f"CASO: {caso.nombre}")
     print(separador)
@@ -101,11 +331,9 @@ def _run_case(caso: TestCase, verbose: bool = True) -> bool:
     print(f"Fichero:  {caso.csv_path or '(ninguno)'}")
     print()
 
-    # Limpiar la caché del grafo entre pruebas para evitar estado residual
     build_agent_graph.cache_clear()
-
     graph = build_agent_graph()
-    thread_id = f"test-{caso.nombre[:20].replace(' ', '-')}"
+    thread_id = f"score-{caso.nombre[:20].replace(' ', '-')}"
     config = {"configurable": {"thread_id": thread_id}}
 
     input_state: dict[str, Any] = {
@@ -115,156 +343,208 @@ def _run_case(caso: TestCase, verbose: bool = True) -> bool:
     }
 
     final_response = ""
-    tools_executed: list[str] = []
-    nodes_visited: list[str] = []
+    tool_messages: list[ToolMessage] = []
+    invoked_name: str | None = None
+    invoked_args: dict = {}
 
     try:
         for event in graph.stream(input_state, config=config):
             node_name = next(iter(event))
             if node_name.startswith("__"):
                 continue
-
-            nodes_visited.append(node_name)
-            node_output: dict = event[node_name]
-            messages_out: list = node_output.get("messages", [])
+            node_output = event[node_name] or {}
+            messages_out: list = node_output.get("messages", []) or []
 
             if verbose:
-                print(f"  → Nodo: {node_name}")
+                print(f"  -> Nodo: {node_name}")
+
+            # Tool call la cogemos del primer AIMessage con tool_calls que veamos
+            if invoked_name is None:
+                cand_name, cand_args = _extract_tool_call_from_messages(messages_out)
+                if cand_name is not None:
+                    invoked_name, invoked_args = cand_name, cand_args
+                    if verbose:
+                        print(f"     Tool call: {invoked_name} args={invoked_args}")
 
             for msg in messages_out:
                 if isinstance(msg, AIMessage):
                     tool_calls = getattr(msg, "tool_calls", None) or []
-                    if tool_calls:
-                        names = [
-                            (c.get("name") if isinstance(c, dict) else getattr(c, "name", "?"))
-                            for c in tool_calls
-                        ]
-                        if verbose:
-                            print(f"     Tool calls emitidas: {names}")
-                    elif msg.content:
+                    if not tool_calls and msg.content:
                         final_response = msg.content
                         if verbose:
-                            preview = textwrap.shorten(msg.content, width=120)
+                            preview = textwrap.shorten(str(msg.content), width=120)
                             print(f"     Respuesta: {preview}")
-
                 elif isinstance(msg, ToolMessage):
-                    tools_executed.append(msg.name)
+                    tool_messages.append(msg)
                     if verbose:
                         preview = textwrap.shorten(str(msg.content), width=100)
                         print(f"     Resultado de {msg.name}: {preview}")
-
     except (ConnectionError, RuntimeError) as exc:
-        print(f"\n  ✗ ERROR DE CONEXIÓN: {exc}")
-        print("  Verifica que Ollama esté en ejecución con el modelo configurado.")
-        return False
+        print(f"\n  ERROR DE CONEXION: {exc}")
+        return CaseScore(caso.nombre, None, 0, 0, 0, 0, 0, f"ConnectionError: {exc}")
     except Exception as exc:
-        print(f"\n  ✗ ERROR INESPERADO: {exc}")
-        return False
+        print(f"\n  ERROR INESPERADO: {type(exc).__name__}: {exc}")
+        return CaseScore(caso.nombre, None, 0, 0, 0, 0, 0, f"{type(exc).__name__}: {exc}")
 
-    # ── Validaciones ─────────────────────────────────────────────────────────
-    ok = True
+    # ── Sub-score 1: tool correcta (40) ─────────────────────────────────────
+    score_tool = W_TOOL if invoked_name == caso.tool_esperada else 0
+    tool_detalle = f"tool={invoked_name!r} esperada={caso.tool_esperada!r}"
+
+    # ── Sub-score 2: args correctos (25) ────────────────────────────────────
+    if caso.args_esperados:
+        aciertos, total = comparar_args(invoked_args, caso.args_esperados)
+        # Damos los 25 pts solo si TODOS los args esperados coinciden
+        score_args = W_ARGS if aciertos == total and total > 0 else int(round(W_ARGS * aciertos / total)) if total else 0
+        args_detalle = f"args={aciertos}/{total}"
+    else:
+        # No hay args esperados (RAG libre / no-tool): se concede el peso entero
+        score_args = W_ARGS
+        args_detalle = "args=N/A"
+
+    # ── Sub-score 3: terminos clave en respuesta (20) ───────────────────────
+    response_l = (final_response or "").lower()
+    encontrados = [t for t in caso.terminos_esperados if t.lower() in response_l]
+    if caso.terminos_esperados:
+        score_terms = W_TERMS if encontrados else 0
+        terms_detalle = f"terms={len(encontrados)}/{len(caso.terminos_esperados)}"
+    else:
+        score_terms = W_TERMS
+        terms_detalle = "terms=N/A"
+
+    # ── Sub-score 4: cita artefactos (15) ───────────────────────────────────
+    artifacts = _artifacts_from_tool_messages(tool_messages)
+    if caso.genera_artefacto:
+        if not artifacts:
+            score_artifact = 0
+            art_detalle = "artifact=NO GENERADO"
+        elif _response_cites_artifact(final_response, artifacts):
+            score_artifact = W_ARTIFACT
+            art_detalle = "artifact=citado"
+        else:
+            score_artifact = 0
+            art_detalle = f"artifact=no_citado ({len(artifacts)} disponibles)"
+    else:
+        score_artifact = W_ARTIFACT  # N/A -> auto-pasa
+        art_detalle = "artifact=N/A"
+
+    total = score_tool + score_args + score_terms + score_artifact
+    detalle = " | ".join([tool_detalle, args_detalle, terms_detalle, art_detalle])
+
     print()
+    print(f"  Tool   : {score_tool}/{W_TOOL}    ({tool_detalle})")
+    print(f"  Args   : {score_args}/{W_ARGS}    ({args_detalle})")
+    print(f"  Terms  : {score_terms}/{W_TERMS}    ({terms_detalle})")
+    print(f"  Artif. : {score_artifact}/{W_ARTIFACT}    ({art_detalle})")
+    print(f"  TOTAL  : {total}/{W_TOTAL}")
 
-    # 1. Debe existir respuesta final
-    if not final_response.strip():
-        print("  ✗ FALLO: no se obtuvo respuesta de texto del agente.")
-        ok = False
-    else:
-        print("  ✓ Se obtuvo respuesta de texto.")
-
-    # 2. Verificar si se esperaba ejecución de herramienta
-    if caso.espera_tool_call:
-        if tools_executed:
-            print(f"  ✓ Herramientas ejecutadas: {tools_executed}")
-        else:
-            print("  ✗ FALLO: se esperaba ejecución de herramienta pero no se ejecutó ninguna.")
-            ok = False
-    else:
-        if tools_executed:
-            print(f"  ⚠ Herramientas ejecutadas sin esperarlo: {tools_executed}")
-        else:
-            print("  ✓ No se ejecutaron herramientas (correcto para este caso).")
-
-    # 3. Verificar términos esperados en la respuesta
-    if caso.términos_esperados:
-        respuesta_lower = final_response.lower()
-        encontrados = [t for t in caso.términos_esperados if t.lower() in respuesta_lower]
-        if encontrados:
-            print(f"  ✓ Términos encontrados en respuesta: {encontrados}")
-        else:
-            print(
-                f"  ✗ FALLO: ningún término esperado encontrado en la respuesta.\n"
-                f"     Esperados: {caso.términos_esperados}"
-            )
-            ok = False
-
-    estado = "PASADO ✓" if ok else "FALLADO ✗"
-    print(f"\n  Resultado: {estado}")
-    return ok
+    return CaseScore(
+        nombre=caso.nombre,
+        tool_invocada=invoked_name,
+        score_tool=score_tool,
+        score_args=score_args,
+        score_terms=score_terms,
+        score_artifact=score_artifact,
+        total=total,
+        detalle=detalle,
+    )
 
 
-def _print_summary(resultados: list[tuple[str, bool]]) -> None:
-    """Imprime el resumen final de todos los casos ejecutados."""
-    separador = "═" * 60
+def _print_summary(resultados: list[CaseScore]) -> None:
+    separador = "=" * 70
     print(f"\n{separador}")
-    print("RESUMEN DE PRUEBAS")
+    print("RESUMEN DE SCORING")
     print(separador)
-    pasados = sum(1 for _, ok in resultados if ok)
-    for nombre, ok in resultados:
-        icono = "✓" if ok else "✗"
-        print(f"  {icono} {nombre}")
-    print(f"\n  Total: {pasados}/{len(resultados)} pasados")
+    print(f"{'#':>2}  {'Caso':<45}  {'Tool':>5}  {'Args':>5}  {'Terms':>5}  {'Art':>4}  {'TOT':>4}")
+    for i, r in enumerate(resultados, start=1):
+        nombre = textwrap.shorten(r.nombre, width=45)
+        print(
+            f"{i:>2}  {nombre:<45}  {r.score_tool:>5}  {r.score_args:>5}  "
+            f"{r.score_terms:>5}  {r.score_artifact:>4}  {r.total:>4}"
+        )
+    total_obt = sum(r.total for r in resultados)
+    total_max = W_TOTAL * len(resultados)
+    pct = (total_obt / total_max * 100.0) if total_max else 0.0
+    print(separador)
+    print(f"  Global: {total_obt}/{total_max} pts = {pct:.1f}%")
     print(separador)
 
 
-# ── Punto de entrada ─────────────────────────────────────────────────────────
+def _write_scorecard_csv(out_path: Path, resultados: list[CaseScore]) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow([
+            "caso", "tool_invocada",
+            "score_tool", "score_args", "score_terms", "score_artifact",
+            "total", "detalle",
+        ])
+        for r in resultados:
+            writer.writerow([
+                r.nombre, r.tool_invocada or "",
+                r.score_tool, r.score_args, r.score_terms, r.score_artifact,
+                r.total, r.detalle,
+            ])
+    total = sum(r.total for r in resultados)
+    max_total = W_TOTAL * len(resultados)
+    pct = (total / max_total * 100.0) if max_total else 0.0
+    print(f"\n  Scorecard escrito en {out_path} ({total}/{max_total} = {pct:.1f}%)")
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Pruebas end-to-end del agente LangGraph desde terminal."
+        description="Pruebas end-to-end del agente LangGraph con scoring ponderado."
     )
     grupo = parser.add_mutually_exclusive_group()
     grupo.add_argument(
-        "--caso",
-        type=int,
-        choices=range(1, len(CASOS) + 1),
-        metavar=f"1-{len(CASOS)}",
-        help="Ejecuta un caso concreto (1 = primero).",
+        "--caso", type=int, metavar="N",
+        help="Ejecuta un caso concreto (1-based).",
     )
     grupo.add_argument(
-        "--todos",
-        action="store_true",
+        "--todos", action="store_true",
         help="Ejecuta todos los casos de prueba.",
     )
     parser.add_argument(
-        "--silencioso",
-        action="store_true",
+        "--silencioso", action="store_true",
         help="Suprime el detalle de nodos y mensajes intermedios.",
+    )
+    parser.add_argument(
+        "--csv-out", type=Path, default=None,
+        help="Ruta de salida del scorecard CSV (ej. tests/results/agent_scorecard.csv).",
     )
     args = parser.parse_args()
 
     verbose = not args.silencioso
 
+    casos = _casos()
     if args.caso:
-        casos_a_ejecutar = [CASOS[args.caso - 1]]
+        if not (1 <= args.caso <= len(casos)):
+            parser.error(f"--caso debe estar entre 1 y {len(casos)}")
+        casos_a_ejecutar = [casos[args.caso - 1]]
     elif args.todos:
-        casos_a_ejecutar = CASOS
+        casos_a_ejecutar = casos
     else:
-        # Por defecto ejecuta los dos primeros casos (los del criterio de aceptación)
-        casos_a_ejecutar = CASOS[:2]
-        print("(Ejecutando casos 1 y 2 por defecto. Usa --todos para ejecutar todos.)")
+        casos_a_ejecutar = casos[:2]
+        print(f"(Ejecutando casos 1 y 2 por defecto. Usa --todos para los {len(casos)} casos.)")
 
-    resultados: list[tuple[str, bool]] = []
+    resultados: list[CaseScore] = []
     for caso in casos_a_ejecutar:
-        ok = _run_case(caso, verbose=verbose)
-        resultados.append((caso.nombre, ok))
+        score = _score_case(caso, verbose=verbose)
+        resultados.append(score)
 
     if len(resultados) > 1:
         _print_summary(resultados)
 
-    # Código de salida no-cero si algún caso falla
-    if not all(ok for _, ok in resultados):
-        sys.exit(1)
+    if args.csv_out is not None:
+        _write_scorecard_csv(args.csv_out, resultados)
+
+    # Codigo de salida: 0 si total global >= 70%, 1 si no
+    total = sum(r.total for r in resultados)
+    max_total = W_TOTAL * len(resultados)
+    pct = (total / max_total * 100.0) if max_total else 0.0
+    sys.exit(0 if pct >= 70 else 1)
 
 
 if __name__ == "__main__":
