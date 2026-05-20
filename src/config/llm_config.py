@@ -56,6 +56,19 @@ def _read_float_env(variable_name: str, default_value: float) -> float:
         ) from exc
 
 
+def _read_bool_env(variable_name: str, default_value: bool) -> bool:
+    """Lee una variable de entorno y la convierte a bool.
+
+    Acepta ``'true'``, ``'1'``, ``'yes'``, ``'on'`` (case-insensitive)
+    como valores verdaderos. Cualquier otro valor se interpreta como
+    falso. Si la variable no está definida se devuelve ``default_value``.
+    """
+    raw_value = os.getenv(variable_name)
+    if raw_value is None or not raw_value.strip():
+        return default_value
+    return raw_value.strip().lower() in ("true", "1", "yes", "on")
+
+
 def load_ollama_settings() -> OllamaSettings:
     """Carga y valida la configuración relacionada con Ollama desde el entorno."""
     base_url = _read_required_env("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
@@ -118,6 +131,34 @@ def get_chat_ollama() -> ChatOllama:
         raise RuntimeError(
             "No se pudo inicializar ChatOllama. Revisa el servicio de Ollama y los valores de .env."
         ) from exc
+
+
+@dataclass(frozen=True)
+class ObservabilitySettings:
+    """Parámetros del subsistema de observabilidad local."""
+
+    enabled: bool
+    log_level: str
+
+
+def load_observability_settings() -> ObservabilitySettings:
+    """Carga la configuración del subsistema de observabilidad desde el entorno.
+
+    Variables soportadas:
+        OBSERVABILITY_ENABLED: ``true``/``false`` (default ``false``).
+        LOG_LEVEL: ``DEBUG`` | ``INFO`` | ``WARNING`` | ``ERROR`` | ``CRITICAL``
+            (default ``INFO``).
+    """
+    enabled = _read_bool_env("OBSERVABILITY_ENABLED", False)
+    log_level = _read_required_env("LOG_LEVEL", "INFO").upper()
+
+    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    if log_level not in valid_levels:
+        raise ValueError(
+            f"LOG_LEVEL debe ser uno de {sorted(valid_levels)}, recibido '{log_level}'."
+        )
+
+    return ObservabilitySettings(enabled=enabled, log_level=log_level)
 
 
 def get_llm_with_tools(tools: list) -> ChatOllama:
