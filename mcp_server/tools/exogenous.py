@@ -12,7 +12,7 @@ from mcp_server.errors import translate_exception
 from mcp_server.file_utils import deterministic_filename, open_csv_for_upload
 from mcp_server.http_client import get_client
 from mcp_server.instance import mcp
-
+from mcp_server.observability.http_hooks import init_http_log, attach_observability
 _SETTINGS = load_settings()
 
 _RELATION_TO_ENDPOINT: dict[str, str] = {
@@ -102,6 +102,7 @@ async def create_exogenous_variable(
     - image_path: ruta del PNG (si se genero).
     - summary: descripcion breve del resultado.
     """
+    init_http_log()
     try:
         inp = CreateExogenousVariableInput(
             file_path=file_path, index_column=index_column,
@@ -139,8 +140,7 @@ async def create_exogenous_variable(
                 plot_response.raise_for_status()
                 png_path = _SETTINGS.workspace_dir / out_name.replace(".csv", ".png")
                 png_path.write_bytes(plot_response.content)
-
-        return {
+        result = {
             "output_path": str(target),
             "new_column_name": inp.new_column_name,
             "relation_used": inp.relation,
@@ -148,6 +148,9 @@ async def create_exogenous_variable(
             "summary": (
                 f"Columna '{inp.new_column_name}' añadida usando relación '{inp.relation}'."
             ),
-        }
+        }        
+        return attach_observability(result)
+    
     except Exception as exc:  # noqa: BLE001
-        return {"error": translate_exception(exc, "create_exogenous_variable")}
+        error_result = {"error": translate_exception(exc, "create_exogenous_variable")}
+        return attach_observability(error_result)

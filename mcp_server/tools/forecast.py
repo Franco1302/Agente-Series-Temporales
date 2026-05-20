@@ -12,7 +12,7 @@ from mcp_server.errors import translate_exception
 from mcp_server.file_utils import deterministic_filename, open_csv_for_upload
 from mcp_server.http_client import get_client
 from mcp_server.instance import mcp
-
+from mcp_server.observability.http_hooks import init_http_log, attach_observability
 _SETTINGS = load_settings()
 
 _MODEL_TO_DATOS: dict[str, str] = {
@@ -108,6 +108,7 @@ async def forecast_time_series(
 
     Devuelve: output_path, metrics (si return_metrics), model_used, image_path, summary.
     """
+    init_http_log()
     try:
         inp = ForecastTimeSeriesInput(
             file_path=file_path, index_column=index_column,
@@ -162,7 +163,7 @@ async def forecast_time_series(
                 png_path = _SETTINGS.workspace_dir / out_name.replace(".csv", ".png")
                 png_path.write_bytes(plot_response.content)
 
-        return {
+        result = {
             "output_path": str(target),
             "metrics": metrics,
             "model_used": inp.model,
@@ -172,5 +173,8 @@ async def forecast_time_series(
                 f"para columna '{inp.target_column}'."
             ),
         }
+        return attach_observability(result)
     except Exception as exc:  # noqa: BLE001
-        return {"error": translate_exception(exc, "forecast_time_series")}
+        
+        error_result = {"error": translate_exception(exc, "forecast_time_series")}
+        return attach_observability(error_result)

@@ -11,7 +11,7 @@ from mcp_server.errors import translate_exception
 from mcp_server.file_utils import open_csv_for_upload
 from mcp_server.http_client import get_client
 from mcp_server.instance import mcp
-
+from mcp_server.observability.http_hooks import init_http_log, attach_observability
 _SETTINGS = load_settings()
 
 _METHOD_TO_ENDPOINT: dict[str, str] = {
@@ -108,6 +108,8 @@ async def detect_drift(
     Devuelve dict con: drift_detected, drift_label, per_column_report, method_used,
     parameters_used, summary.
     """
+
+    init_http_log()
     try:
         inp = DetectDriftInput(
             file_path=file_path, index_column=index_column, method=method,
@@ -131,13 +133,17 @@ async def detect_drift(
         drift_label = body.get("Drift", "Desconocido")
         report = body.get("reporte", {})
 
-        return {
+        # Construimos la respuesta feliz y la envolvemos para adjuntar la telemetría recolectada
+        result = {
             "drift_detected": drift_label == "Detectado",
             "drift_label": drift_label,
             "per_column_report": report,
             "method_used": inp.method,
             "parameters_used": params,
-            "summary": _build_summary(inp.method, drift_label, report),
+            "summary": _build_summary(inp.method, drift_label, report)
         }
+        return attach_observability(result)
     except Exception as exc:  # noqa: BLE001 — se traduce al LLM
-        return {"error": translate_exception(exc, "detect_drift")}
+        error_result = {"error": translate_exception(exc, "detect_drift")}
+        return attach_observability(error_result)
+        

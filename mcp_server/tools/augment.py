@@ -12,6 +12,7 @@ from mcp_server.errors import translate_exception
 from mcp_server.file_utils import deterministic_filename, open_csv_for_upload
 from mcp_server.http_client import get_client
 from mcp_server.instance import mcp
+from mcp_server.observability.http_hooks import init_http_log, attach_observability
 
 _SETTINGS = load_settings()
 
@@ -111,6 +112,7 @@ async def augment_time_series(
     - image_path: ruta del PNG (si se genero).
     - summary: descripcion breve del resultado.
     """
+    init_http_log()
     try:
         inp = AugmentTimeSeriesInput(
             file_path=file_path, index_column=index_column, strategy=strategy,
@@ -148,15 +150,17 @@ async def augment_time_series(
                 plot_response.raise_for_status()
                 png_path = _SETTINGS.workspace_dir / out_name.replace(".csv", ".png")
                 png_path.write_bytes(plot_response.content)
-
-        return {
-            "output_path": str(target),
-            "new_rows": inp.size,
-            "strategy_used": inp.strategy,
-            "image_path": str(png_path) if png_path else None,
-            "summary": (
-                f"CSV aumentado con estrategia '{inp.strategy}' (+{inp.size} filas)."
-            ),
+        result = {
+                "output_path": str(target),
+                "new_rows": inp.size,
+                "strategy_used": inp.strategy,
+                "image_path": str(png_path) if png_path else None,
+                "summary": (
+                    f"CSV aumentado con estrategia '{inp.strategy}' (+{inp.size} filas)."
+                ),
         }
+        return attach_observability(result)
+    
     except Exception as exc:  # noqa: BLE001
-        return {"error": translate_exception(exc, "augment_time_series")}
+        error_result = {"error": translate_exception(exc, "augment_time_series")}
+        return attach_observability(error_result)

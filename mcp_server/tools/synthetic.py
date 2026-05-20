@@ -13,7 +13,7 @@ from mcp_server.errors import translate_exception
 from mcp_server.file_utils import deterministic_filename
 from mcp_server.http_client import get_client
 from mcp_server.instance import mcp
-
+from mcp_server.observability.http_hooks import init_http_log, attach_observability
 _SETTINGS = load_settings()
 
 _FREQ = Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"]
@@ -175,6 +175,7 @@ async def generate_synthetic_distribution(
 
     Devuelve: output_path, rows_generated, image_path, summary.
     """
+    init_http_log()
     try:
         inp = GenerateDistributionInput(
             start_date=start_date, end_date=end_date, periods=periods,
@@ -207,7 +208,7 @@ async def generate_synthetic_distribution(
                 png_path = await _download_png(client, f"/Plot/distribucion/{suffix}", params, png_name)
 
         rows = _row_count(csv_path)
-        return {
+        result = {
             "output_path": str(csv_path),
             "rows_generated": rows,
             "image_path": str(png_path) if png_path else None,
@@ -216,8 +217,10 @@ async def generate_synthetic_distribution(
                 f"({rows} filas, freq={inp.frequency})."
             ),
         }
+        return attach_observability(result)
     except Exception as exc:  # noqa: BLE001
-        return {"error": translate_exception(exc, "generate_synthetic_distribution")}
+        error_result = {"error": translate_exception(exc, "generate_synthetic_distribution")}
+        return attach_observability(error_result)
 
 
 # ───────────────────────── 2. generate_synthetic_arma ─────────────────────────
@@ -286,22 +289,27 @@ async def generate_synthetic_arma(
                 png_path = await _download_png(client, f"/Plot/ARMA/{suffix}", params, png_name)
 
         rows = _row_count(csv_path)
-        return {
+        result = {
             "output_path": str(csv_path),
             "rows_generated": rows,
             "image_path": str(png_path) if png_path else None,
             "model_spec": {
+                "constant": inp.constant,
+                "noise_std": inp.noise_std,
+                "seasonality": inp.seasonality,
                 "ar": inp.ar_coefficients,
                 "ma": inp.ma_coefficients,
-                "seasonality": inp.seasonality,
             },
             "summary": (
                 f"Serie ARMA generada ({rows} filas, AR={len(inp.ar_coefficients)}, "
                 f"MA={len(inp.ma_coefficients)}, freq={inp.frequency})."
             ),
         }
+        return attach_observability(result)
+       
     except Exception as exc:  # noqa: BLE001
-        return {"error": translate_exception(exc, "generate_synthetic_arma")}
+        error_result = {"error": translate_exception(exc, "generate_synthetic_arma")}
+        return attach_observability(error_result)
 
 
 # ───────────────────────── 3. generate_synthetic_periodic ─────────────────────────
@@ -334,6 +342,7 @@ async def generate_synthetic_periodic(
 
     Devuelve: output_path, rows_generated, image_path, summary.
     """
+    init_http_log()
     try:
         inp = GeneratePeriodicInput(
             start_date=start_date, end_date=end_date, periods=periods,
@@ -369,18 +378,20 @@ async def generate_synthetic_periodic(
                 png_path = await _download_png(client, f"/Plot/periodicos/{suffix}", params, png_name)
 
         rows = _row_count(csv_path)
-        return {
+        result = {
             "output_path": str(csv_path),
             "rows_generated": rows,
             "image_path": str(png_path) if png_path else None,
-            "summary": (
+            "summary": (  
                 f"Serie periódica generada ({rows} filas, period_length={inp.period_length}, "
                 f"pattern_type={inp.pattern_type})."
             ),
         }
+        return attach_observability(result)
+       
     except Exception as exc:  # noqa: BLE001
-        return {"error": translate_exception(exc, "generate_synthetic_periodic")}
-
+        error_result = {"error": translate_exception(exc, "generate_synthetic_periodic")}
+        return attach_observability(error_result)
 
 # ───────────────────────── 4. generate_synthetic_trend ─────────────────────────
 
@@ -411,6 +422,7 @@ async def generate_synthetic_trend(
 
     Devuelve: output_path, rows_generated, image_path, summary.
     """
+    init_http_log()
     try:
         inp = GenerateTrendInput(
             start_date=start_date, end_date=end_date, periods=periods,
@@ -443,7 +455,7 @@ async def generate_synthetic_trend(
                 png_path = await _download_png(client, f"/Plot/tendencia/{suffix}", params, png_name)
 
         rows = _row_count(csv_path)
-        return {
+        result = {
             "output_path": str(csv_path),
             "rows_generated": rows,
             "image_path": str(png_path) if png_path else None,
@@ -451,5 +463,7 @@ async def generate_synthetic_trend(
                 f"Serie con tendencia generada ({rows} filas, trend_type={inp.trend_type})."
             ),
         }
+        return attach_observability(result)
     except Exception as exc:  # noqa: BLE001
-        return {"error": translate_exception(exc, "generate_synthetic_trend")}
+        error_result = {"error": translate_exception(exc, "generate_synthetic_trend")}
+        return attach_observability(error_result)
