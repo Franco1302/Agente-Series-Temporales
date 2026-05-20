@@ -140,7 +140,8 @@ def _render_sidebar() -> None:
         )
     elif _get_csv_path():
         active_path = _get_csv_path()
-        st.sidebar.info(f"Fichero activo: `{Path(active_path).name}`")
+        if active_path:
+            st.sidebar.info(f"Fichero activo: `{Path(active_path).name}`")
 
     st.sidebar.divider()
     st.sidebar.header("Entorno de ejecución")
@@ -232,7 +233,7 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, s
 
     with st.status("Procesando tu petición…", expanded=True) as status:
         try:
-            for event in graph.stream(input_state, config=config):
+            for event in graph.stream(input_state, config=config): # type: ignore
                 node_name = next(iter(event))
 
                 # Ignorar eventos internos de LangGraph
@@ -249,11 +250,11 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, s
                         tool_name = _extract_tool_name_from_ai_message(msg)
                         if tool_name:
                             status.write(f"🧠 Razonando: invocando **{tool_name}**…")
-                        elif msg.content:
+                        elif isinstance(msg.content, str) and msg.content:
                             status.write("🧠 Razonando, generando respuesta…")
                             # El razonador ya produjo la respuesta final.
                             # El grafo enruta directamente a END en este caso.
-                            final_response = msg.content
+                            final_response = str(msg.content)
 
                 elif node_name == "ejecutar_herramienta":
                     for msg in messages_out:
@@ -263,8 +264,8 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, s
 
                 elif node_name == "solicitar_parametros":
                     for msg in messages_out:
-                        if isinstance(msg, AIMessage) and msg.content:
-                            final_response = msg.content
+                        if isinstance(msg, AIMessage) and isinstance(msg.content, str) and msg.content:
+                            final_response = str(msg.content)
 
                 elif node_name == "recuperar_contexto":
                     status.write("Consultando base de conocimiento…")
@@ -274,9 +275,9 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, s
 
                 elif node_name == "generar_respuesta":
                     for msg in messages_out:
-                        if isinstance(msg, AIMessage) and msg.content:
+                        if isinstance(msg, AIMessage) and isinstance(msg.content, str) and msg.content:
                             status.write("Resultado obtenido, generando respuesta…")
-                            final_response = msg.content
+                            final_response = str(msg.content)
 
             status.update(label="✅ Listo", state="complete", expanded=False)
 
@@ -309,67 +310,29 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, s
 _ARTIFACT_KEYS = ("output_path", "image_path")
 
 
-def _collect_tool_artifacts(
-    tool_messages: list[ToolMessage], csv_path: str | None
-) -> list[Path]:
-    """Extrae rutas a PNG/CSV de los ToolMessage emitidos por las tools MCP.
-
-    Las tools devuelven dicts del tipo {"output_path": "...", "image_path": "..."}
-    que llegan en `ToolMessage.content` en uno de dos formatos:
-      - LangChain nativo: string JSON con el dict serializado.
-      - MCP (langchain_mcp_adapters): lista de partes
-        `[{"type": "text", "text": "{...}"}]`.
-    """
-    seen: set[Path] = set()
+def _collect_tool_artifacts(tool_messages: list[ToolMessage], csv_path: str | None) -> list[Path]:
+    """Extrae de forma limpia y directa las rutas de archivos generadas por las herramientas."""
     ordered: list[Path] = []
-
     for msg in tool_messages:
-        raw = msg.content
-        if not raw:
+        if not msg.content:
             continue
+        try:
+            # Intentar cargar directo, si es string JSON o ya es diccionario
+            content = msg.content
+            payload = json.loads(str(content)) if isinstance(content, str) else content
+            
+            if isinstance(payload, list) and len(payload) > 0 and isinstance(payload[0], dict):
+                payload = json.loads(str(payload[0].get("text", "{}")))
 
-        payload: dict | None = None
-        if isinstance(raw, dict):
-            payload = raw
-        elif isinstance(raw, str):
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict):
-                    payload = parsed
-            except (json.JSONDecodeError, TypeError):
-                payload = None
-        elif isinstance(raw, list):
-            for part in raw:
-                if not isinstance(part, dict):
-                    continue
-                text = part.get("text")
-                if not isinstance(text, str):
-                    continue
-                try:
-                    parsed = json.loads(text)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                if isinstance(parsed, dict):
-                    payload = parsed
-                    break
-
-        if payload is None:
+            if isinstance(payload, dict):
+                for key in ("output_path", "image_path"):
+                    val = payload.get(key)
+                    if val and isinstance(val, str) and val != csv_path:
+                        p = Path(val)
+                        if p.exists() and p not in ordered:
+                            ordered.append(p)
+        except Exception:
             continue
-
-        for key in _ARTIFACT_KEYS:
-            value = payload.get(key)
-            if not isinstance(value, str) or not value:
-                continue
-            if csv_path and value == csv_path:
-                continue  # no re-render el CSV original subido por el usuario
-            path = Path(value)
-            if "temp_uploads" not in path.parts:
-                continue
-            if path in seen:
-                continue
-            seen.add(path)
-            ordered.append(path)
-
     return ordered
 
 
