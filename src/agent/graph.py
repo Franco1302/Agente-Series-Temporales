@@ -19,6 +19,7 @@ from src.agent.nodes import (
     tool_execution_node,
 )
 from src.agent.state import AgentState
+from src.observability.decorators import traced_node
 
 
 @lru_cache(maxsize=1)
@@ -43,13 +44,23 @@ def build_agent_graph():
     """
     builder = StateGraph(AgentState)
 
-    # ── Registro de nodos ──────────────────────────────────────────────────────
-    builder.add_node("razonador", razonador_node)
-    builder.add_node("ejecutar_herramienta", tool_execution_node)
-    builder.add_node("solicitar_parametros", solicitar_parametros_node)
-    builder.add_node("gestionar_error", gestionar_error_node)
-    builder.add_node("recuperar_contexto", recuperar_contexto_node)
-    builder.add_node("generar_respuesta", generar_respuesta_node)
+    # ── Registro de nodos (envueltos con traced_node para observabilidad) ─────
+    # El decorador es no-op cuando OBSERVABILITY_ENABLED=false, así que la
+    # latencia añadida en producción es despreciable.
+    builder.add_node("razonador", traced_node("razonador")(razonador_node))
+    builder.add_node(
+        "ejecutar_herramienta", traced_node("ejecutar_herramienta")(tool_execution_node)
+    )
+    builder.add_node(
+        "solicitar_parametros", traced_node("solicitar_parametros")(solicitar_parametros_node)
+    )
+    builder.add_node("gestionar_error", traced_node("gestionar_error")(gestionar_error_node))
+    builder.add_node(
+        "recuperar_contexto", traced_node("recuperar_contexto")(recuperar_contexto_node)
+    )
+    builder.add_node(
+        "generar_respuesta", traced_node("generar_respuesta")(generar_respuesta_node)
+    )
 
     # ── Arista de entrada ──────────────────────────────────────────────────────
     builder.add_edge(START, "razonador")
