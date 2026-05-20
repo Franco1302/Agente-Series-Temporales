@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 from typing import Annotated, Literal, Optional
 
+import pandas as pd
 from pydantic import BaseModel, Field
 
 from mcp_server.config import load_settings
@@ -58,10 +60,56 @@ def _build_query_params(inp: DetectDriftInput) -> dict:
         params["drift_cusum"] = inp.drift_cusum if inp.drift_cusum is not None else 0.5
     elif inp.method in {"MEWMA", "HOTELLING"}:
         params["min_instances"] = inp.min_instances if inp.min_instances is not None else 100
-        params["alpha"] = inp.alpha if inp.alpha is not None else 0
+        # alpha es el nivel de significación del límite de control: 0 es
+        # degenerado (puede producir un w*S singular en la API). Default 0.05.
+        params["alpha"] = inp.alpha if inp.alpha is not None else 0.05
         if inp.method == "MEWMA":
             params["lambd"] = inp.lambd if inp.lambd is not None else 0.5
     return params
+
+
+def _validate_multivariate(content: bytes, index_column: str) -> Optional[str]:
+    """Valida que el CSV es apto para un método multivariante (MEWMA/HOTELLING).
+
+    Estos métodos estiman e invierten una matriz de covarianza, así que
+    necesitan al menos dos columnas numéricas con varianza no nula. Si el
+    dataset no cumple, la API responde con un 500 opaco
+    (`numpy.linalg.LinAlgError: Singular matrix`); este chequeo previo lo
+    convierte en un mensaje accionable que el agente ReAct puede usar
+    para reintentar con otro método.
+
+    Parámetros:
+        content: Bytes del CSV (los mismos que se envían a la API).
+        index_column: Columna índice, que se excluye de las features.
+
+    Retorno:
+        Un mensaje de error si el dataset no es apto, o ``None`` si lo es.
+    """
+    try:
+        df = pd.read_csv(io.BytesIO(content))
+    except Exception:  # noqa: BLE001
+        # No bloqueamos por un fallo de parseo: que sea la API quien decida.
+        return None
+
+    features = df.drop(columns=[index_column], errors="ignore")
+    numeric = features.select_dtypes(include="number")
+
+    if numeric.shape[1] < 2:
+        return (
+            f"El método multivariante requiere al menos 2 columnas numéricas y "
+            f"el dataset solo tiene {numeric.shape[1]}. Para una serie de una "
+            "sola variable usa un método univariante: KS, JS, PSI o CUSUM."
+        )
+
+    constantes = [c for c in numeric.columns if numeric[c].nunique(dropna=True) <= 1]
+    if constantes:
+        return (
+            f"Las columnas {constantes} son constantes (varianza nula): la matriz "
+            "de covarianza sería singular y el método multivariante fallaría. "
+            "Elimínalas del dataset o usa un método univariante."
+        )
+
+    return None
 
 
 def _build_summary(method: str, label: str, report: dict) -> str:
@@ -91,7 +139,7 @@ async def detect_drift(
     drift_cusum: Annotated[Optional[float], Field(description="Solo CUSUM: término de deriva (default 0.5).")] = None,
     min_instances: Annotated[Optional[int], Field(description="MEWMA, HOTELLING: observaciones iniciales (default 100).")] = None,
     lambd: Annotated[Optional[float], Field(description="MEWMA: parámetro de suavizado (default 0.5).")] = None,
-    alpha: Annotated[Optional[float], Field(description="MEWMA, HOTELLING: nivel alpha (default 0).")] = None,
+    alpha: Annotated[Optional[float], Field(description="MEWMA, HOTELLING: nivel de significación (default 0.05).")] = None,
 ) -> dict:
     """Ejecuta un test estadístico de detección de drift sobre un CSV.
 
@@ -120,6 +168,14 @@ async def detect_drift(
         endpoint = _METHOD_TO_ENDPOINT[inp.method]
         params = _build_query_params(inp)
         filename, content, mime = open_csv_for_upload(inp.file_path)
+
+        # Los métodos multivariantes invierten una matriz de covarianza:
+        # validamos la dimensionalidad antes de llamar a la API para evitar
+        # un 500 opaco (LinAlgError: Singular matrix) y devolver un mensaje útil.
+        if inp.method in {"MEWMA", "HOTELLING"}:
+            problema = _validate_multivariate(content, inp.index_column)
+            if problema is not None:
+                return attach_observability({"error": f"Parámetro inválido en detect_drift: {problema}"})
 
         async with get_client(_SETTINGS) as client:
             response = await client.post(
