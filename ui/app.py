@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from pathlib import Path
 from typing import cast
@@ -223,13 +224,21 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, s
     tool_messages: list[ToolMessage] = []
     
     trace_id = start_turn(thread_id)
+    turn_t0 = time.perf_counter()
     emit(TraceEvent(
         trace_id=trace_id,
         thread_id=thread_id,
         name="interaccion_usuario",
         event_type=EVENT_TURN_START,
-        attributes={"user_query_len": len(user_prompt)}
+        attributes={
+            "user_message_len": len(user_prompt),
+            "has_csv": csv_path is not None,
+        },
     ))
+
+    # Métricas agregadas del turno para el evento turn_end.
+    n_nodes = 0
+    final_decision = "answer"
 
     with st.status("Procesando tu petición…", expanded=True) as status:
         try:
@@ -239,6 +248,8 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, s
                 # Ignorar eventos internos de LangGraph
                 if node_name.startswith("__"):
                     continue
+
+                n_nodes += 1
 
                 node_output: dict = event[node_name]
                 messages_out: list = node_output.get("messages", [])
@@ -263,6 +274,7 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, s
                             tool_messages.append(msg)
 
                 elif node_name == "solicitar_parametros":
+                    final_decision = "ask_params"
                     for msg in messages_out:
                         if isinstance(msg, AIMessage) and isinstance(msg.content, str) and msg.content:
                             final_response = str(msg.content)
@@ -283,24 +295,37 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, s
 
         except (ConnectionError, RuntimeError) as exc:
             status.update(label="❌ Error de conexión", state="error", expanded=True)
+            total_ms = (time.perf_counter() - turn_t0) * 1000.0
             emit(TraceEvent(
                 trace_id=trace_id,
                 thread_id=thread_id,
-                name="error_turno",
+                name="fin_turno",
                 event_type=EVENT_TURN_END,
-                attributes={"status": "error", "error": str(exc)}
+                duration_ms=total_ms,
+                attributes={
+                    "n_nodes": n_nodes,
+                    "total_duration_ms": total_ms,
+                    "final_decision": "error",
+                    "error": str(exc),
+                },
             ))
             raise exc
 
     artifacts = _collect_tool_artifacts(tool_messages, csv_path)
     _render_generated_artifacts(artifacts)
-    
+
+    total_ms = (time.perf_counter() - turn_t0) * 1000.0
     emit(TraceEvent(
         trace_id=trace_id,
         thread_id=thread_id,
         name="fin_turno",
         event_type=EVENT_TURN_END,
-        attributes={"status": "ok"}
+        duration_ms=total_ms,
+        attributes={
+            "n_nodes": n_nodes,
+            "total_duration_ms": total_ms,
+            "final_decision": final_decision,
+        },
     ))
     return final_response, trace_id
 

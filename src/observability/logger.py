@@ -103,11 +103,11 @@ def _ensure_initialized() -> None:
 
         settings = load_observability_settings()
         configure(enabled=settings.enabled, level=settings.log_level)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        # No conseguimos leer la config: marcamos como intentado y nos quedamos
-        # apagados. No hay que reintentar en cada emit().
+    except Exception:
+        # No conseguimos leer la config: marcamos como intentado y nos
+        # quedamos apagados, en silencio. La observabilidad jamás debe
+        # interferir con el proceso anfitrión, ni siquiera con ruido en
+        # stderr. No hay que reintentar en cada emit().
         with _state_lock:
             _initialized = True
             _logger = None

@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
@@ -160,7 +161,7 @@ def load_observability_settings() -> ObservabilitySettings:
     return ObservabilitySettings(enabled=enabled, log_level=log_level)
 
 
-def get_llm_with_tools(tools: list) -> ChatOllama:
+def get_llm_with_tools(tools: list) -> Any:
     """Devuelve un ChatOllama con las herramientas enlazadas para Tool Calling.
 
     A diferencia de `get_chat_ollama`, esta función no se cachea porque la lista
