@@ -12,7 +12,7 @@ from mcp_server.errors import translate_exception
 from mcp_server.file_utils import deterministic_filename, open_csv_for_upload
 from mcp_server.http_client import get_client
 from mcp_server.instance import mcp
-from mcp_server.observability.http_hooks import init_http_log, attach_observability
+from mcp_server.observability.http_hooks import init_mcp_http_log, attach_observability
 
 _SETTINGS = load_settings()
 
@@ -112,7 +112,7 @@ async def augment_time_series(
     - image_path: ruta del PNG (si se genero).
     - summary: descripcion breve del resultado.
     """
-    init_http_log()
+    init_mcp_http_log()
     try:
         inp = AugmentTimeSeriesInput(
             file_path=file_path, index_column=index_column, strategy=strategy,

@@ -13,7 +13,7 @@ from mcp_server.errors import translate_exception
 from mcp_server.file_utils import deterministic_filename
 from mcp_server.http_client import get_client
 from mcp_server.instance import mcp
-from mcp_server.observability.http_hooks import init_http_log, attach_observability
+from mcp_server.observability.http_hooks import init_mcp_http_log, attach_observability
 _SETTINGS = load_settings()
 
 _FREQ = Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"]
@@ -175,7 +175,7 @@ async def generate_synthetic_distribution(
 
     Devuelve: output_path, rows_generated, image_path, summary.
     """
-    init_http_log()
+    init_mcp_http_log()
     try:
         inp = GenerateDistributionInput(
             start_date=start_date, end_date=end_date, periods=periods,
@@ -252,6 +252,7 @@ async def generate_synthetic_arma(
 
     Devuelve: output_path, rows_generated, image_path, summary, model_spec.
     """
+    init_mcp_http_log()
     try:
         inp = GenerateArmaInput(
             start_date=start_date, end_date=end_date, periods=periods,
@@ -342,7 +343,7 @@ async def generate_synthetic_periodic(
 
     Devuelve: output_path, rows_generated, image_path, summary.
     """
-    init_http_log()
+    init_mcp_http_log()
     try:
         inp = GeneratePeriodicInput(
             start_date=start_date, end_date=end_date, periods=periods,
@@ -422,7 +423,7 @@ async def generate_synthetic_trend(
 
     Devuelve: output_path, rows_generated, image_path, summary.
     """
-    init_http_log()
+    init_mcp_http_log()
     try:
         inp = GenerateTrendInput(
             start_date=start_date, end_date=end_date, periods=periods,

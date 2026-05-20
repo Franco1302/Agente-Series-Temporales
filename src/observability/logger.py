@@ -19,7 +19,8 @@ from typing import Optional
 from .events import TraceEvent
 
 _LOGGER_NAME = "tfg.observability"
-_LOG_DIR = Path("data/logs")
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_LOG_DIR = _PROJECT_ROOT / "data" / "logs"
 _LOG_FILE = _LOG_DIR / "agent.jsonl"
 _MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 _BACKUP_COUNT = 5
@@ -102,7 +103,9 @@ def _ensure_initialized() -> None:
 
         settings = load_observability_settings()
         configure(enabled=settings.enabled, level=settings.log_level)
-    except Exception:
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         # No conseguimos leer la config: marcamos como intentado y nos quedamos
         # apagados. No hay que reintentar en cada emit().
         with _state_lock:

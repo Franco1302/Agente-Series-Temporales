@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.agent.graph import build_agent_graph
 from src.config.llm_config import load_ollama_settings
+from src.observability import start_turn, emit, TraceEvent, EVENT_TURN_START, EVENT_TURN_END
 
 # Directorio donde se guardan los ficheros subidos por el usuario.
 _UPLOADS_DIR = Path(__file__).resolve().parents[1] / "data" / "temp_uploads"
@@ -183,6 +184,14 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
 
     final_response = ""
     tool_messages: list[ToolMessage] = []
+    
+    trace_id = start_turn(thread_id)
+    emit(TraceEvent(
+        trace_id=trace_id,
+        thread_id=thread_id,
+        name="interaccion_usuario",
+        event_type=EVENT_TURN_START
+    ))
 
     with st.status("Procesando tu petición…", expanded=True) as status:
         try:
@@ -236,10 +245,25 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
 
         except (ConnectionError, RuntimeError) as exc:
             status.update(label="❌ Error de conexión", state="error", expanded=True)
+            emit(TraceEvent(
+                trace_id=trace_id,
+                thread_id=thread_id,
+                name="error_turno",
+                event_type=EVENT_TURN_END,
+                attributes={"status": "error", "error": str(exc)}
+            ))
             raise exc
 
     artifacts = _collect_tool_artifacts(tool_messages, csv_path)
     _render_generated_artifacts(artifacts)
+    
+    emit(TraceEvent(
+        trace_id=trace_id,
+        thread_id=thread_id,
+        name="fin_turno",
+        event_type=EVENT_TURN_END,
+        attributes={"status": "ok"}
+    ))
     return final_response
 
 

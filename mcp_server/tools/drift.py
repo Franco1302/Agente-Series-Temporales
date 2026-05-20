@@ -11,7 +11,7 @@ from mcp_server.errors import translate_exception
 from mcp_server.file_utils import open_csv_for_upload
 from mcp_server.http_client import get_client
 from mcp_server.instance import mcp
-from mcp_server.observability.http_hooks import init_http_log, attach_observability
+from mcp_server.observability.http_hooks import init_mcp_http_log, attach_observability
 _SETTINGS = load_settings()
 
 _METHOD_TO_ENDPOINT: dict[str, str] = {
@@ -109,7 +109,7 @@ async def detect_drift(
     parameters_used, summary.
     """
 
-    init_http_log()
+    init_mcp_http_log()
     try:
         inp = DetectDriftInput(
             file_path=file_path, index_column=index_column, method=method,

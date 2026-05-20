@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from src.observability import start_turn, emit, TraceEvent, EVENT_TURN_START, EVENT_TURN_END
 
 from scripts._scoring_utils import comparar_args
 from src.agent.graph import build_agent_graph
@@ -336,6 +337,14 @@ def _score_case(caso: TestCase, verbose: bool = True) -> CaseScore:
     thread_id = f"score-{caso.nombre[:20].replace(' ', '-')}"
     config = {"configurable": {"thread_id": thread_id}}
 
+    trace_id = start_turn(thread_id)
+    emit(TraceEvent(
+        trace_id=trace_id,
+        thread_id=thread_id,
+        name="test_case",
+        event_type=EVENT_TURN_START
+    ))
+
     input_state: dict[str, Any] = {
         "messages": [HumanMessage(content=caso.mensaje)],
         "csv_path": caso.csv_path,
@@ -379,11 +388,33 @@ def _score_case(caso: TestCase, verbose: bool = True) -> CaseScore:
                     if verbose:
                         preview = textwrap.shorten(str(msg.content), width=100)
                         print(f"     Resultado de {msg.name}: {preview}")
+                        
+        emit(TraceEvent(
+            trace_id=trace_id,
+            thread_id=thread_id,
+            name="fin_test_case",
+            event_type=EVENT_TURN_END,
+            attributes={"status": "ok"}
+        ))
     except (ConnectionError, RuntimeError) as exc:
         print(f"\n  ERROR DE CONEXION: {exc}")
+        emit(TraceEvent(
+            trace_id=trace_id,
+            thread_id=thread_id,
+            name="error_test_case",
+            event_type=EVENT_TURN_END,
+            attributes={"status": "error", "error": str(exc)}
+        ))
         return CaseScore(caso.nombre, None, 0, 0, 0, 0, 0, f"ConnectionError: {exc}")
     except Exception as exc:
         print(f"\n  ERROR INESPERADO: {type(exc).__name__}: {exc}")
+        emit(TraceEvent(
+            trace_id=trace_id,
+            thread_id=thread_id,
+            name="error_test_case",
+            event_type=EVENT_TURN_END,
+            attributes={"status": "error", "error": str(exc)}
+        ))
         return CaseScore(caso.nombre, None, 0, 0, 0, 0, 0, f"{type(exc).__name__}: {exc}")
 
     # ── Sub-score 1: tool correcta (40) ─────────────────────────────────────
