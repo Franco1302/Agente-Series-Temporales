@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+import time
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.agent.state import AgentState
-from src.tools.rag_tool import consultar_teoria
+# Importamos la herramienta y su extractor lateral de contexto seguro
+from src.tools.rag_tool import consultar_teoria, pop_last_retrieval
+
+# Componentes de la infraestructura analítica del sistema
+from src.observability.context import get_current_span, get_thread_id, get_trace_id, new_span_id
+from src.observability.events import EVENT_RAG_RETRIEVAL, TraceEvent
+from src.observability.logger import emit, is_enabled
 
 
 def _extract_query(state: AgentState) -> str:
     """Devuelve la query refinada de la tool call si existe; si no, el último HumanMessage."""
     messages = state.get("messages", [])
 
-    # 1) Preferir la query refinada que el LLM puso en la tool call
     for msg in reversed(messages):
         if not isinstance(msg, AIMessage):
             continue
@@ -29,7 +35,6 @@ def _extract_query(state: AgentState) -> str:
             return query.strip()
         break
 
-    # 2) Fallback: último HumanMessage
     for msg in reversed(messages):
         if isinstance(msg, HumanMessage):
             return str(msg.content).strip()
@@ -38,22 +43,10 @@ def _extract_query(state: AgentState) -> str:
 
 
 def recuperar_contexto_node(state: AgentState) -> dict:
-    """Ejecuta una búsqueda RAG y devuelve el resultado como ToolMessage.
-
-    Toma la consulta refinada que el LLM emitió en la tool call de
-    `consultar_teoria`, llama a la herramienta y emite el ToolMessage
-    de cierre asociado al `tool_call_id`. El razonador, en su siguiente
-    pasada, leerá ese ToolMessage como respuesta natural a su tool call
-    y sintetizará la respuesta final.
-
-    Sin el ToolMessage, ChatOllama lanza el error
-    "tool call without a corresponding tool message" cuando el ciclo
-    vuelve al razonador.
-    """
+    """Ejecuta una búsqueda RAG, mide su latencia y emite métricas estructuradas."""
     messages = state.get("messages", [])
     query_text = _extract_query(state)
 
-    # Localizar el id de la tool call para el ToolMessage de cierre
     tool_call_id: str | None = None
     for msg in reversed(messages):
         if not isinstance(msg, AIMessage):
@@ -69,7 +62,30 @@ def recuperar_contexto_node(state: AgentState) -> dict:
     if not query_text or not tool_call_id:
         return {}
 
+    t0 = time.perf_counter()
+    
+    # Invocación real síncrona de la herramienta RAG documental
     result = consultar_teoria.invoke({"query": query_text})
+    
+    duration_ms = (time.perf_counter() - t0) * 1000.0
+
+    # Extraemos de forma limpia las métricas del RAG (Scores, Chunks, Inner Tokens)
+    rag_metrics = pop_last_retrieval()
+
+    # Si la observabilidad está activa y se recuperaron métricas, disparamos el evento local
+    if is_enabled() and rag_metrics:
+        emit(
+            TraceEvent(
+                trace_id=get_trace_id(),
+                thread_id=get_thread_id(),
+                name="rag.consultar_teoria",
+                event_type=EVENT_RAG_RETRIEVAL,
+                span_id=new_span_id(),
+                parent_span_id=get_current_span(),
+                duration_ms=duration_ms,
+                attributes=rag_metrics
+            )
+        )
 
     if isinstance(result, str) and result.startswith("Error:"):
         return {"error_info": result}

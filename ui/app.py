@@ -13,7 +13,17 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.agent.graph import build_agent_graph
 from src.config.llm_config import load_ollama_settings
-from src.observability import start_turn, emit, TraceEvent, EVENT_TURN_START, EVENT_TURN_END
+from src.observability import (
+    EVENT_TURN_END,
+    EVENT_TURN_START,
+    TraceEvent,
+    emit,
+    is_enabled,
+    log_file_path,
+    read_recent_thread_lines,
+    read_trace_lines,
+    start_turn,
+)
 
 # Directorio donde se guardan los ficheros subidos por el usuario.
 _UPLOADS_DIR = Path(__file__).resolve().parents[1] / "data" / "temp_uploads"
@@ -147,6 +157,31 @@ def _render_sidebar() -> None:
     st.sidebar.subheader("Conversación")
     thread_id = _get_thread_id()
     st.sidebar.caption(f"Thread ID: `{thread_id[:8]}…`")
+    
+    if is_enabled():
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📊 Historial de Trazas (Sesión)")
+        
+        recent_logs = read_recent_thread_lines(log_file_path(), thread_id=thread_id, tail_lines=30)
+        if recent_logs:
+            df_recent = pd.DataFrame(recent_logs)
+            st.sidebar.dataframe(
+                df_recent[["name", "event_type", "duration_ms"]],
+                height=200,
+                use_container_width=True
+            )
+        else:
+            st.sidebar.caption("Esperando interacciones para poblar el log...")
+            
+        if Path(log_file_path()).exists():
+            with open(log_file_path(), "rb") as file_data:
+                st.sidebar.download_button(
+                    label="📥 Descargar agent.jsonl",
+                    data=file_data,
+                    file_name="tfg_agent_observability.jsonl",
+                    mime="application/jsonlines",
+                    use_container_width=True
+                )
 
     if st.sidebar.button("Limpiar conversación"):
         _reset_chat_state()
@@ -166,10 +201,11 @@ def _extract_tool_name_from_ai_message(msg: AIMessage) -> str | None:
     return getattr(first, "name", None)
 
 
-def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
+def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, str | None]:
     """Invoca el grafo con streaming y renderiza el progreso mediante st.status().
 
-    Devuelve el texto final de respuesta del agente para añadirlo al historial.
+    Devuelve la tupla (texto_respuesta_del_agente, trace_id) para añadirlo al historial
+    y para habilitar el reproductor de trazas.
     """
     graph = build_agent_graph()
     thread_id = _get_thread_id()
@@ -190,7 +226,8 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
         trace_id=trace_id,
         thread_id=thread_id,
         name="interaccion_usuario",
-        event_type=EVENT_TURN_START
+        event_type=EVENT_TURN_START,
+        attributes={"user_query_len": len(user_prompt)}
     ))
 
     with st.status("Procesando tu petición…", expanded=True) as status:
@@ -264,7 +301,7 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> str:
         event_type=EVENT_TURN_END,
         attributes={"status": "ok"}
     ))
-    return final_response
+    return final_response, trace_id
 
 
 # ── Auto-render de artefactos generados por las tools MCP ──────────────────
@@ -380,7 +417,7 @@ def main() -> None:
 
     with st.chat_message("assistant"):
         try:
-            assistant_reply = _run_agent_streaming(
+            assistant_reply, trace_id = _run_agent_streaming(
                 user_prompt=user_prompt,
                 csv_path=_get_csv_path(),
             )
@@ -389,6 +426,16 @@ def main() -> None:
             else:
                 assistant_reply = "(El agente no produjo una respuesta de texto.)"
                 st.warning(assistant_reply)
+                
+            if is_enabled():
+                with st.expander("🛠️ Ver traza analítica del turno (OpenTelemetry compatible)"):
+                    lineas_turno = read_trace_lines(log_file_path(), trace_id=trace_id)
+                    if lineas_turno:
+                        df_turno = pd.DataFrame(lineas_turno)
+                        df_render = df_turno[["timestamp", "name", "event_type", "duration_ms", "attributes"]].copy()
+                        st.dataframe(df_render, use_container_width=True)
+                    else:
+                        st.caption("No se localizaron trazas en disco para este identificador.")
 
         except Exception as exc:
             assistant_reply = (

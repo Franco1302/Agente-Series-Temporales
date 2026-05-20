@@ -41,6 +41,7 @@ from .events import (
 )
 from .llm_metrics import emit_llm_call, extract_llm_attributes
 from .logger import configure, emit, is_enabled, log_file_path
+from .reader import read_recent_thread_lines, read_trace_lines
 
 __all__ = [
     "TraceEvent",
@@ -50,6 +51,8 @@ __all__ = [
     "extract_llm_attributes",
     "is_enabled",
     "log_file_path",
+    "read_recent_thread_lines",
+    "read_trace_lines",
     "span",
     "start_turn",
     "new_span_id",

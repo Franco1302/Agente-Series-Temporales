@@ -72,3 +72,25 @@ def get_retriever(top_k: int = 4) -> VectorStoreRetriever:
         search_type="similarity",
         search_kwargs={"k": top_k},
     )
+
+def get_vector_store() -> Chroma:
+    """Devuelve la instancia nativa de la base de datos Chroma en modo lectura.
+
+    Permite al subsistema de observabilidad ejecutar búsquedas complejas
+    conservando los scores de distancia vectorial para la memoria del TFG.
+    """
+    _ensure_vector_db_ready(VECTOR_DB_DIR)
+    ollama_base_url = _load_ollama_base_url()
+
+    embeddings = OllamaEmbeddings(
+        model=EMBEDDING_MODEL,
+        base_url=ollama_base_url,
+    )
+
+    return Chroma(
+        collection_name="langchain",
+        embedding_function=embeddings,
+        persist_directory=str(VECTOR_DB_DIR),
+        create_collection_if_not_exists=False,
+    )
+
