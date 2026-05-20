@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
@@ -13,6 +14,7 @@ from src.agent.prompts import build_system_prompt
 from src.agent.state import AgentState
 from src.agent.tools import AGENT_TOOLS
 from src.config.llm_config import get_llm_with_tools
+from src.observability import emit_llm_call
 
 _MAX_ERRORS = 3
 
@@ -124,8 +126,20 @@ def razonador_node(state: AgentState) -> dict:
         tools_for_bind = AGENT_TOOLS
 
     llm = get_llm_with_tools(tools_for_bind)
-    response = llm.invoke(messages)
-    response = _coerce_text_toolcall(response)
+    t0 = time.perf_counter()
+    raw_response = llm.invoke(messages)
+    duration_ms = (time.perf_counter() - t0) * 1000.0
+    response = _coerce_text_toolcall(raw_response)
+
+    # Evento llm_call: tokens, tokens/s y si actuó el parser de fallback.
+    # No-op cuando el subsistema de observabilidad está apagado.
+    emit_llm_call(
+        name="razonador.llm",
+        messages=messages,
+        response_raw=raw_response,
+        response_final=response,
+        duration_ms=duration_ms,
+    )
 
     updates: dict = {
         "messages": [response],

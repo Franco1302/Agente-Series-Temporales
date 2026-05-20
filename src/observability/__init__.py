@@ -39,12 +39,15 @@ from .events import (
     EVENT_TURN_START,
     TraceEvent,
 )
+from .llm_metrics import emit_llm_call, extract_llm_attributes
 from .logger import configure, emit, is_enabled, log_file_path
 
 __all__ = [
     "TraceEvent",
     "configure",
     "emit",
+    "emit_llm_call",
+    "extract_llm_attributes",
     "is_enabled",
     "log_file_path",
     "span",

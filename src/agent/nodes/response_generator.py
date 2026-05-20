@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import time
+
 from langchain_core.messages import SystemMessage
 
 from src.agent.prompts import build_system_prompt
 from src.agent.state import AgentState
 from src.config.llm_config import get_llm_with_tools
+from src.observability import emit_llm_call
 
 
 def generar_respuesta_node(state: AgentState) -> dict:
@@ -38,7 +41,19 @@ def generar_respuesta_node(state: AgentState) -> dict:
         messages = [messages[0], rag_msg] + messages[1:]
 
     llm = get_llm_with_tools([])
+    t0 = time.perf_counter()
     response = llm.invoke(messages)
+    duration_ms = (time.perf_counter() - t0) * 1000.0
+
+    # generar_respuesta no usa _coerce_text_toolcall: el LLM ya está sin
+    # tools enlazadas, así que coerce_fired siempre quedará en False.
+    emit_llm_call(
+        name="generar_respuesta.llm",
+        messages=messages,
+        response_raw=response,
+        response_final=None,
+        duration_ms=duration_ms,
+    )
 
     return {
         "messages": [response],
