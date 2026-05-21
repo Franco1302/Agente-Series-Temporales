@@ -26,9 +26,6 @@ COMPORTAMIENTO:
   detalles, debes invocar generate_synthetic_series con arguments={} (sin start_date,
   sin periods, sin frequency, sin distribution_type, sin distribution_params).
   El nodo solicitar_parametros pedirá al usuario los datos que falten.
-- Tras recibir el resultado de una herramienta (mensaje de tipo tool), interpreta los
-  valores en lenguaje natural y ofrece conclusiones accionables. No te limites a
-  repetir los números en bruto.
 - Si el usuario hace una pregunta sobre tus capacidades o sobre cómo usarte, responde
   directamente sin invocar ninguna herramienta.
 - Para cualquier pregunta teórica sobre data drift, tests estadísticos, series
@@ -116,21 +113,73 @@ Si una herramienta requiere un fichero CSV, pide al usuario que lo suba
 mediante el panel lateral antes de continuar.
 """
 
+# Herramientas analíticas cuyo resultado debe explicarse con la estructura de
+# tres bloques (RESULTADO / INTERPRETACIÓN / SIGUIENTE PASO). `consultar_teoria`
+# se excluye a propósito: sus respuestas son teóricas y van en prosa natural.
+ANALYTICAL_TOOL_NAMES: frozenset[str] = frozenset({
+    "detect_drift",
+    "forecast_time_series",
+    "augment_time_series",
+    "create_exogenous_variable",
+    "generate_synthetic_distribution",
+    "generate_synthetic_arma",
+    "generate_synthetic_periodic",
+    "generate_synthetic_trend",
+})
+
+# Bloque condicional: solo se añade al prompt cuando hay un resultado de una
+# herramienta analítica que el razonador debe integrar en su respuesta final.
+# Los dos ejemplos few-shot anclan el formato en el modelo pequeño (Qwen 2.5 3B).
+_EXPLAIN_RESULT_BLOCK = """\
+EXPLICACIÓN DE RESULTADOS:
+Si el último mensaje 'tool' proviene de una herramienta analítica y vas a
+responder en TEXTO (no otra tool call), estructura SIEMPRE la respuesta en estos
+tres bloques, en este orden y con estas etiquetas exactas en negrita:
+
+**RESULTADO:** los datos exactos del mensaje 'tool'. Copia los valores numéricos
+y las etiquetas EXACTAMENTE como aparecen; no inventes ni redondees.
+**INTERPRETACIÓN:** qué significan esos datos para el usuario, en lenguaje claro
+y sin jerga innecesaria.
+**SIGUIENTE PASO:** una sugerencia accionable y concreta.
+
+Ejemplo (drift):
+**RESULTADO:** Drift detectado con el método KS (p-valor 0.03 < umbral 0.05).
+**INTERPRETACIÓN:** La distribución de los datos ha cambiado de forma
+estadísticamente significativa respecto al periodo de referencia.
+**SIGUIENTE PASO:** Reentrena el modelo con los datos recientes o amplía el
+dataset antes de volver a evaluar.
+
+Ejemplo (forecast):
+**RESULTADO:** Predicción a 12 pasos generada con SARIMAX (MAE 4.1, RMSE 5.8).
+**INTERPRETACIÓN:** El modelo anticipa la evolución de la serie con un error
+medio de unas 4 unidades, un margen moderado.
+**SIGUIENTE PASO:** Compara con Prophet si necesitas más precisión.
+"""
+
 
 def build_system_prompt(
     csv_path: str | None = None,
     csv_metadata: dict | None = None,
+    tool_result_to_explain: str | None = None,
 ) -> str:
     """Construye el prompt del sistema adaptado al contexto de la sesión.
 
     Args:
         csv_path: Ruta al CSV activo si el usuario ha subido uno; None si no hay fichero.
         csv_metadata: Dict con claves 'columns', 'rows' y 'dtypes' cuando csv_path no es None.
+        tool_result_to_explain: Nombre de la herramienta cuyo resultado el razonador
+            debe integrar en su respuesta final. Si es una herramienta analítica
+            (ver `ANALYTICAL_TOOL_NAMES`), se añade el bloque de instrucciones
+            RESULTADO / INTERPRETACIÓN / SIGUIENTE PASO. None para mensajes
+            conversacionales o respuestas teóricas (RAG), que no fuerzan formato.
 
     Returns:
         Prompt del sistema completo listo para pasarlo como SystemMessage.
     """
     blocks: list[str] = [_ROLE_BLOCK, _BEHAVIOR_BLOCK, _TOOLS_BLOCK]
+
+    if tool_result_to_explain in ANALYTICAL_TOOL_NAMES:
+        blocks.append(_EXPLAIN_RESULT_BLOCK)
 
     if csv_path:
         from pathlib import Path
