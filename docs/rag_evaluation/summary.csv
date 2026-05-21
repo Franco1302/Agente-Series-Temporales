@@ -1,0 +1,5 @@
+label,timestamp,search_type,k,n_questions,n_supported,precision_at_k,recall_at_k,mrr
+baseline,2026-05-21T08:25:34+00:00,similarity,5,20,20,0.3700,0.1259,0.5708
+mmr,2026-05-21T08:33:15+00:00,mmr,5,20,20,0.2500,0.0968,0.5892
+hybrid,2026-05-21T08:49:59+00:00,hybrid,5,20,20,0.3900,0.1382,0.5908
+final,2026-05-21T09:33:00+00:00,hybrid,5,20,20,0.3900,0.1382,0.5908
