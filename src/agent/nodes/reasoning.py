@@ -10,7 +10,7 @@ import uuid
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
 from src.agent.nodes.param_request import TOOL_REQUIRED_PARAMS
-from src.agent.prompts import build_system_prompt
+from src.agent.prompts import ANALYTICAL_TOOL_NAMES, build_system_prompt
 from src.agent.state import AgentState
 from src.agent.tools import AGENT_TOOLS
 from src.config.llm_config import get_llm_with_tools
@@ -121,6 +121,126 @@ def _append_fuentes(response: AIMessage, messages: list) -> None:
         response.content = content.rstrip() + "\n\n" + fuentes
 
 
+# Campos deterministas (string/entero) que deben citarse literalmente en el
+# bloque RESULTADO de cada herramienta analítica. Se usan para verificar la
+# fidelidad numérica de la síntesis (RF-11). Los floats (p-valores, métricas)
+# se omiten a propósito: el modelo puede redondearlos legítimamente y un
+# substring-match daría falsos negativos.
+_MUST_CITE_FIELDS: dict[str, tuple[str, ...]] = {
+    "detect_drift": ("drift_label", "method_used"),
+    "forecast_time_series": ("model_used",),
+    "augment_time_series": ("new_rows", "strategy_used"),
+    "create_exogenous_variable": ("new_column_name", "relation_used"),
+    "generate_synthetic_distribution": ("rows_generated",),
+    "generate_synthetic_arma": ("rows_generated",),
+    "generate_synthetic_periodic": ("rows_generated",),
+    "generate_synthetic_trend": ("rows_generated",),
+}
+
+
+def _last_analytical_tool_message(messages: list) -> ToolMessage | None:
+    """Devuelve el último ToolMessage de una herramienta analítica, o None.
+
+    Replica la lógica de corte de `_last_tool_message_name`: si encuentra un
+    AIMessage de texto plano antes que un ToolMessage, el ciclo anterior ya
+    cerró y no se sigue buscando.
+    """
+    for msg in reversed(messages):
+        if isinstance(msg, ToolMessage):
+            if getattr(msg, "name", None) in ANALYTICAL_TOOL_NAMES:
+                return msg
+            return None
+        if isinstance(msg, AIMessage) and not getattr(msg, "tool_calls", None):
+            return None
+    return None
+
+
+def _extract_must_cite_facts(tool_msg: ToolMessage) -> list[str]:
+    """Extrae del ToolMessage los valores deterministas que deben aparecer citados.
+
+    El contenido ya es JSON (lo reescribe `_parse_tool_payload`). Solo se
+    recogen valores string o entero; cualquier fallo de parseo devuelve una
+    lista vacía para no romper el flujo.
+    """
+    try:
+        raw = tool_msg.content
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(data, dict):
+            return []
+        fields = _MUST_CITE_FIELDS.get(getattr(tool_msg, "name", "") or "", ())
+        facts: list[str] = []
+        for key in fields:
+            value = data.get(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (str, int)):
+                texto = str(value).strip()
+                if texto:
+                    facts.append(texto)
+        return facts
+    except Exception:  # noqa: BLE001 — la verificación nunca debe abortar el grafo
+        return []
+
+
+def _missing_facts(response_text: str, facts: list[str]) -> list[str]:
+    """Devuelve los facts que NO aparecen como substring (case-insensitive)."""
+    texto = response_text.lower()
+    return [f for f in facts if f.lower() not in texto]
+
+
+def _verify_and_repair(response: AIMessage, messages: list) -> AIMessage:
+    """Verifica la fidelidad numérica de la síntesis y reintenta una vez si falla.
+
+    Si la respuesta omite algún valor determinista del ToolMessage analítico,
+    reinvoca el LLM (sin herramientas, para forzar texto) con un mensaje
+    correctivo. Conserva el reintento solo si reduce los valores omitidos; en
+    caso contrario mantiene la respuesta original. Cualquier excepción devuelve
+    la respuesta original: la verificación nunca debe romper el grafo.
+    """
+    try:
+        content = response.content
+        if not isinstance(content, str) or not content.strip():
+            return response
+
+        tool_msg = _last_analytical_tool_message(messages)
+        if tool_msg is None:
+            return response
+
+        facts = _extract_must_cite_facts(tool_msg)
+        missing = _missing_facts(content, facts)
+        if not missing:
+            return response
+
+        correccion = SystemMessage(content=(
+            "Tu borrador de respuesta omitió estos valores exactos del resultado "
+            f"de la herramienta: {', '.join(missing)}. Genera de nuevo la respuesta "
+            "completa con los tres bloques (**RESULTADO:**, **INTERPRETACIÓN:**, "
+            "**SIGUIENTE PASO:**) y cita esos valores literalmente dentro de "
+            "**RESULTADO:**."
+        ))
+        llm = get_llm_with_tools([])
+        t0 = time.perf_counter()
+        retry = llm.invoke(messages + [correccion])
+        duration_ms = (time.perf_counter() - t0) * 1000.0
+        emit_llm_call(
+            name="razonador.fidelidad_retry",
+            messages=messages + [correccion],
+            response_raw=retry,
+            response_final=retry,
+            duration_ms=duration_ms,
+        )
+
+        if (
+            isinstance(retry.content, str)
+            and retry.content.strip()
+            and len(_missing_facts(retry.content, facts)) < len(missing)
+        ):
+            return retry
+        return response
+    except Exception:  # noqa: BLE001 — la verificación nunca debe abortar el grafo
+        return response
+
+
 def razonador_node(state: AgentState) -> dict:
     """Invoca el LLM con el estado actual y decide la próxima acción.
 
@@ -150,9 +270,18 @@ def razonador_node(state: AgentState) -> dict:
     csv_path = state.get("csv_path")
     csv_metadata = state.get("csv_metadata")
 
-    system_prompt = build_system_prompt(csv_path=csv_path, csv_metadata=csv_metadata)
-
     messages = list(state["messages"])
+
+    # Si el último ToolMessage proviene de una herramienta analítica, el prompt
+    # incorpora el bloque RESULTADO / INTERPRETACIÓN / SIGUIENTE PASO para que la
+    # síntesis final cumpla RF-11. `build_system_prompt` ignora los nombres que no
+    # sean analíticos (p. ej. consultar_teoria), así que esto no afecta al RAG.
+    last_tool = _last_tool_message_name(messages)
+    system_prompt = build_system_prompt(
+        csv_path=csv_path,
+        csv_metadata=csv_metadata,
+        tool_result_to_explain=last_tool,
+    )
 
     # Inyectar system prompt si el primer mensaje no es ya un SystemMessage
     if not messages or not isinstance(messages[0], SystemMessage):
@@ -160,7 +289,6 @@ def razonador_node(state: AgentState) -> dict:
 
     # Selección de tools: si el último ToolMessage es de consultar_teoria,
     # excluimos esa tool del bind para impedir bucles RAG → RAG → RAG.
-    last_tool = _last_tool_message_name(messages)
     if last_tool == "consultar_teoria":
         tools_for_bind = [t for t in AGENT_TOOLS if t.name != "consultar_teoria"]
     else:
@@ -195,6 +323,12 @@ def razonador_node(state: AgentState) -> dict:
     # forma determinista a partir del contexto que devolvió consultar_teoria.
     if not tool_calls and last_tool == "consultar_teoria":
         _append_fuentes(response, messages)
+    elif not tool_calls and last_tool in ANALYTICAL_TOOL_NAMES:
+        # Fidelidad numérica (RF-11): verifica que los valores deterministas del
+        # ToolMessage analítico aparecen en la síntesis; si faltan, reintenta la
+        # generación una sola vez. Nunca rompe el flujo si la verificación falla.
+        response = _verify_and_repair(response, messages)
+        updates["messages"] = [response]
 
     if tool_calls:
         call = tool_calls[0]
