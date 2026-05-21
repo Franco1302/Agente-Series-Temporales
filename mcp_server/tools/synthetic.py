@@ -70,6 +70,23 @@ async def _download_png(
     return target
 
 
+async def _try_download_png(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    params: dict,
+    out_name: str,
+) -> Optional[Path]:
+    """Descarga el PNG best-effort: si falla, devuelve None sin abortar la tool.
+
+    El CSV ya es un resultado valido por si mismo; la grafica es opcional, asi
+    que un fallo del endpoint /Plot no debe descartar la serie generada.
+    """
+    try:
+        return await _download_png(client, endpoint, params, out_name)
+    except Exception:  # noqa: BLE001 — el CSV ya es válido; la gráfica es opcional
+        return None
+
+
 def _row_count(csv_path: Path) -> int:
     """Cuenta filas de datos (excluye cabecera). Devuelve 0 si falla la lectura."""
     try:
@@ -90,7 +107,7 @@ class GenerateDistributionInput(BaseModel):
     distribution_type: int
     distribution_params: list[float]
     column_name: str = "valor"
-    with_plot: bool = False
+    with_plot: bool = True
 
 
 class GenerateArmaInput(BaseModel):
@@ -105,7 +122,7 @@ class GenerateArmaInput(BaseModel):
     seasonality: int = 0
     ar_coefficients: list[float] = []
     ma_coefficients: list[float] = []
-    with_plot: bool = False
+    with_plot: bool = True
 
 
 class GeneratePeriodicInput(BaseModel):
@@ -119,7 +136,7 @@ class GeneratePeriodicInput(BaseModel):
     distribution_params: list[float]
     period_length: int
     pattern_type: Literal[1, 2]
-    with_plot: bool = False
+    with_plot: bool = True
 
 
 class GenerateTrendInput(BaseModel):
@@ -132,7 +149,7 @@ class GenerateTrendInput(BaseModel):
     trend_type: int
     trend_params: list[float]
     noise: float = 0.0
-    with_plot: bool = False
+    with_plot: bool = True
 
 
 # ───────────────────────── 1. generate_synthetic_distribution ─────────────────────────
@@ -156,7 +173,7 @@ async def generate_synthetic_distribution(
     end_date: Annotated[Optional[str], Field(description="Fecha de fin 'YYYY-MM-DD'. Excluyente con periods.")] = None,
     periods: Annotated[Optional[int], Field(description="Número de periodos. Excluyente con end_date.")] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna generada.")] = "valor",
-    with_plot: Annotated[bool, Field(description="Si True, genera además un PNG con la gráfica.")] = False,
+    with_plot: Annotated[bool, Field(description="Si True, genera además un PNG con la gráfica.")] = True,
 ) -> dict:
     """Genera una serie temporal sintética siguiendo una distribución estadistica.
 
@@ -205,7 +222,7 @@ async def generate_synthetic_distribution(
             png_path: Optional[Path] = None
             if inp.with_plot:
                 png_name = out_name.replace(".csv", ".png")
-                png_path = await _download_png(client, f"/Plot/distribucion/{suffix}", params, png_name)
+                png_path = await _try_download_png(client, f"/Plot/distribucion/{suffix}", params, png_name)
 
         rows = _row_count(csv_path)
         result = {
@@ -237,7 +254,7 @@ async def generate_synthetic_arma(
     seasonality: Annotated[int, Field(description="Periodo de estacionalidad (0 = no estacional).")] = 0,
     ar_coefficients: Annotated[list[float], Field(description="Coeficientes AR. Lista vacía = sin AR.")] = [],
     ma_coefficients: Annotated[list[float], Field(description="Coeficientes MA. Lista vacía = sin MA.")] = [],
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = False,
+    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
 ) -> dict:
     """Genera una serie temporal con estructura ARMA(p,q).
 
@@ -287,7 +304,7 @@ async def generate_synthetic_arma(
             png_path: Optional[Path] = None
             if inp.with_plot:
                 png_name = out_name.replace(".csv", ".png")
-                png_path = await _download_png(client, f"/Plot/ARMA/{suffix}", params, png_name)
+                png_path = await _try_download_png(client, f"/Plot/ARMA/{suffix}", params, png_name)
 
         rows = _row_count(csv_path)
         result = {
@@ -326,7 +343,7 @@ async def generate_synthetic_periodic(
     end_date: Annotated[Optional[str], Field(description="Fecha de fin (excluyente con periods).")] = None,
     periods: Annotated[Optional[int], Field(description="Número de periodos (excluyente con end_date).")] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna.")] = "valor",
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = False,
+    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
 ) -> dict:
     """Genera una serie temporal con patrones ciclicos repetidos.
 
@@ -376,7 +393,7 @@ async def generate_synthetic_periodic(
             png_path: Optional[Path] = None
             if inp.with_plot:
                 png_name = out_name.replace(".csv", ".png")
-                png_path = await _download_png(client, f"/Plot/periodicos/{suffix}", params, png_name)
+                png_path = await _try_download_png(client, f"/Plot/periodicos/{suffix}", params, png_name)
 
         rows = _row_count(csv_path)
         result = {
@@ -406,7 +423,7 @@ async def generate_synthetic_trend(
     periods: Annotated[Optional[int], Field(description="Número de periodos (excluyente con end_date).")] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna.")] = "valor",
     noise: Annotated[float, Field(description="Magnitud del ruido aditivo gaussiano.")] = 0.0,
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = False,
+    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
 ) -> dict:
     """Genera una serie temporal con tendencia determinista.
 
@@ -453,7 +470,7 @@ async def generate_synthetic_trend(
             png_path: Optional[Path] = None
             if inp.with_plot:
                 png_name = out_name.replace(".csv", ".png")
-                png_path = await _download_png(client, f"/Plot/tendencia/{suffix}", params, png_name)
+                png_path = await _try_download_png(client, f"/Plot/tendencia/{suffix}", params, png_name)
 
         rows = _row_count(csv_path)
         result = {

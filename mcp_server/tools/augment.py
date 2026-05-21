@@ -35,7 +35,7 @@ class AugmentTimeSeriesInput(BaseModel):
     duplication_factor: Optional[float] = None
     perturbation_std: Optional[float] = None
     statistical_type: Optional[int] = None
-    with_plot: bool = False
+    with_plot: bool = True
 
 
 def _build_query_params(inp: AugmentTimeSeriesInput) -> dict:
@@ -95,7 +95,7 @@ async def augment_time_series(
         Optional[int],
         Field(description="Solo strategy='statistical': tipo de estadístico (default 1)."),
     ] = None,
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = False,
+    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
 ) -> dict:
     """Genera observaciones adicionales para un CSV existente preservando estadisticos.
 
@@ -142,14 +142,18 @@ async def augment_time_series(
 
             png_path: Optional[Path] = None
             if inp.with_plot:
-                plot_response = await client.post(
-                    f"/Plot{endpoint}",
-                    params=params,
-                    files={"file": (filename, content, mime)},
-                )
-                plot_response.raise_for_status()
-                png_path = _SETTINGS.workspace_dir / out_name.replace(".csv", ".png")
-                png_path.write_bytes(plot_response.content)
+                # Best-effort: el CSV ya es válido; un fallo de /Plot no debe abortar la tool.
+                try:
+                    plot_response = await client.post(
+                        f"/Plot{endpoint}",
+                        params=params,
+                        files={"file": (filename, content, mime)},
+                    )
+                    plot_response.raise_for_status()
+                    png_path = _SETTINGS.workspace_dir / out_name.replace(".csv", ".png")
+                    png_path.write_bytes(plot_response.content)
+                except Exception:  # noqa: BLE001 — la gráfica es opcional
+                    png_path = None
         result = {
                 "output_path": str(target),
                 "new_rows": inp.size,

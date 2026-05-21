@@ -40,7 +40,7 @@ class ForecastTimeSeriesInput(BaseModel):
     frequency: Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"] = "D"
     regressor: Optional[str] = None
     return_metrics: bool = True
-    with_plot: bool = False
+    with_plot: bool = True
 
 
 def _datos_params(inp: ForecastTimeSeriesInput) -> dict:
@@ -92,7 +92,7 @@ async def forecast_time_series(
         Field(description="Solo forecaster_autoreg: nombre del regresor (default RandomForestRegressor)."),
     ] = None,
     return_metrics: Annotated[bool, Field(description="Si True, también devuelve métricas de error.")] = True,
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG con la predicción.")] = False,
+    with_plot: Annotated[bool, Field(description="Si True, también genera PNG con la predicción.")] = True,
 ) -> dict:
     """Entrena un modelo predictivo y devuelve un horizonte de prediccion.
 
@@ -154,14 +154,18 @@ async def forecast_time_series(
                     metrics = {"raw": err_response.text[:500]}
 
             if inp.with_plot:
-                plot_response = await client.post(
-                    f"/Plot{datos_endpoint}",
-                    params=datos_params,
-                    files={"file": (filename, content, mime)},
-                )
-                plot_response.raise_for_status()
-                png_path = _SETTINGS.workspace_dir / out_name.replace(".csv", ".png")
-                png_path.write_bytes(plot_response.content)
+                # Best-effort: el CSV ya es válido; un fallo de /Plot no debe abortar la tool.
+                try:
+                    plot_response = await client.post(
+                        f"/Plot{datos_endpoint}",
+                        params=datos_params,
+                        files={"file": (filename, content, mime)},
+                    )
+                    plot_response.raise_for_status()
+                    png_path = _SETTINGS.workspace_dir / out_name.replace(".csv", ".png")
+                    png_path.write_bytes(plot_response.content)
+                except Exception:  # noqa: BLE001 — la gráfica es opcional
+                    png_path = None
 
         result = {
             "output_path": str(target),
