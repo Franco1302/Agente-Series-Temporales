@@ -34,7 +34,7 @@ class CreateExogenousVariableInput(BaseModel):
     new_column_name: str
     relation: Literal["pca", "correlation", "covariance", "linear", "polynomial"]
     coefficients: Optional[list[float]] = None
-    with_plot: bool = False
+    with_plot: bool = True
 
 
 def _build_query_params(inp: CreateExogenousVariableInput) -> dict:
@@ -80,7 +80,7 @@ async def create_exogenous_variable(
         Optional[list[float]],
         Field(description="Solo linear/polynomial: lista de coeficientes."),
     ] = None,
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = False,
+    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
 ) -> dict:
     """Añade una nueva columna sintetica al CSV calculada a partir de las existentes.
 
@@ -132,14 +132,18 @@ async def create_exogenous_variable(
 
             png_path: Optional[Path] = None
             if inp.with_plot:
-                plot_response = await client.post(
-                    f"/Plot{endpoint}",
-                    params=params,
-                    files={"file": (filename, content, mime)},
-                )
-                plot_response.raise_for_status()
-                png_path = _SETTINGS.workspace_dir / out_name.replace(".csv", ".png")
-                png_path.write_bytes(plot_response.content)
+                # Best-effort: el CSV ya es válido; un fallo de /Plot no debe abortar la tool.
+                try:
+                    plot_response = await client.post(
+                        f"/Plot{endpoint}",
+                        params=params,
+                        files={"file": (filename, content, mime)},
+                    )
+                    plot_response.raise_for_status()
+                    png_path = _SETTINGS.workspace_dir / out_name.replace(".csv", ".png")
+                    png_path.write_bytes(plot_response.content)
+                except Exception:  # noqa: BLE001 — la gráfica es opcional
+                    png_path = None
         result = {
             "output_path": str(target),
             "new_column_name": inp.new_column_name,

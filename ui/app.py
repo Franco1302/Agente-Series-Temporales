@@ -312,6 +312,8 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, s
             raise exc
 
     artifacts = _collect_tool_artifacts(tool_messages, csv_path)
+    if is_enabled():
+        _render_artifact_debug(tool_messages, artifacts, csv_path)
     _render_generated_artifacts(artifacts)
 
     total_ms = (time.perf_counter() - turn_t0) * 1000.0
@@ -359,6 +361,41 @@ def _collect_tool_artifacts(tool_messages: list[ToolMessage], csv_path: str | No
         except Exception:
             continue
     return ordered
+
+
+def _render_artifact_debug(
+    tool_messages: list[ToolMessage],
+    artifacts: list[Path],
+    csv_path: str | None,
+) -> None:
+    """Muestra en pantalla el payload parseado de cada ToolMessage y las rutas detectadas.
+
+    Panel de depuración: confirma qué llega realmente desde las tools MCP
+    (output_path / image_path) y si los ficheros existen en disco. Solo se
+    renderiza con el modo de observabilidad activo (`is_enabled()`).
+    """
+    with st.expander("🐞 DEBUG artefactos"):
+        if not tool_messages:
+            st.caption("No se ejecutó ninguna herramienta en este turno.")
+        for i, msg in enumerate(tool_messages):
+            st.markdown(f"**ToolMessage #{i}** — `{msg.name}`")
+            try:
+                content = msg.content
+                payload = json.loads(str(content)) if isinstance(content, str) else content
+                if isinstance(payload, list) and len(payload) > 0 and isinstance(payload[0], dict):
+                    payload = json.loads(str(payload[0].get("text", "{}")))
+            except Exception as exc:  # noqa: BLE001
+                st.write(f"⚠️ No se pudo parsear el contenido: {exc}")
+                continue
+            st.json(payload if isinstance(payload, dict) else {"_raw": str(payload)})
+            if isinstance(payload, dict):
+                for key in ("output_path", "image_path"):
+                    val = payload.get(key)
+                    if val:
+                        existe = Path(str(val)).exists()
+                        st.write(f"`{key}` → `{val}` · exists={existe}")
+        st.markdown(f"**Artefactos detectados:** {[str(p) for p in artifacts]}")
+        st.caption(f"csv_path activo: `{csv_path}`")
 
 
 def _render_generated_artifacts(artifacts: list[Path]) -> None:
