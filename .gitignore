@@ -52,3 +52,5 @@ CLAUDE.md
 *.md
 requirements_benchmark.txt
 requirements-dev.txt
+*.csv
+*.json
