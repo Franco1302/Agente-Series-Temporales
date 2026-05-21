@@ -58,6 +58,15 @@ def _read_positive_int_env(variable_name: str, default_value: int) -> int:
 
 
 def _build_context_fragments(documents: list[Document]) -> tuple[str, list[str]]:
+    """Construye el contexto (solo texto) y la lista de fuentes para la cita.
+
+    El contexto que recibe el razonador son UNICAMENTE los textos de los
+    fragmentos, sin andamiaje de metadatos por fragmento. Ese andamiaje
+    (``[FRAGMENTO n]`` / ``Fuente`` / ``Jerarquia`` / ``Chunk ID``) hacia que el
+    modelo pequeno copiara la plantilla en la respuesta en lugar de redactar.
+    La cita de fuentes es determinista (Paso 6), asi que los metadatos solo
+    alimentan la lista ``sources`` para el bloque final.
+    """
     fragments: list[str] = []
     sources: list[str] = []
     for idx, doc in enumerate(documents, start=1):
@@ -69,8 +78,7 @@ def _build_context_fragments(documents: list[Document]) -> tuple[str, list[str]]
         content = (doc.page_content or "").strip()
         if not content:
             continue
-        fragment = f"[FRAGMENTO {idx}]\nFuente: {source}\nJerarquia: {hierarchy}\nChunk ID: {chunk_id}\nContenido:\n{content}"
-        fragments.append(fragment)
+        fragments.append(content)
         sources.append(f"{source} | {hierarchy} | chunk {chunk_id}")
 
     context = "\n\n---\n\n".join(fragments)
@@ -122,6 +130,12 @@ def consultar_teoria(query: str) -> str:
     })
     # ─────────────────────────────────────────────────────────────────────────
 
-    # Contexto estructurado: el razonador sintetiza la respuesta a partir de el.
+    # Contexto en crudo: el razonador redacta la respuesta a partir de el. El
+    # encabezado avisa de que es material interno y NO debe copiarse literal.
     sources_block = "\n".join(f"- {source_line}" for source_line in sources)
-    return f"{context}\n\nFuentes consultadas:\n{sources_block}"
+    return (
+        "Material de referencia recuperado del corpus del TFG "
+        "(uso interno; redacta la respuesta con tus palabras, no lo copies):\n\n"
+        f"{context}\n\n"
+        f"Fuentes consultadas:\n{sources_block}"
+    )
