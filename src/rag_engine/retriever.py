@@ -15,6 +15,36 @@ ENV_FILE = PROJECT_ROOT / ".env"
 VECTOR_DB_DIR = PROJECT_ROOT / "data" / "vector_db"
 EMBEDDING_MODEL = "nomic-embed-text"
 
+# Defaults sensatos: si no
+# se configura nada en .env el comportamiento es identico al historico.
+DEFAULT_SEARCH_TYPE = "similarity"
+DEFAULT_FETCH_K = 20
+DEFAULT_MMR_LAMBDA = 0.5
+_VALID_SEARCH_TYPES = {"similarity", "mmr", "hybrid"}
+
+
+def _read_positive_int_env(name: str, default: int) -> int:
+    """Lee una variable de entorno entera positiva; si no es valida, el default."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _read_float_env(name: str, default: float) -> float:
+    """Lee una variable de entorno de tipo float; si no es valida, el default."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
 
 def _load_ollama_base_url() -> str:
     """Lee OLLAMA_BASE_URL desde .env y valida su valor."""

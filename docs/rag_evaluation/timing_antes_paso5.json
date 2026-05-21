@@ -1,0 +1,73 @@
+{
+  "label": "antes_paso5",
+  "timestamp": "2026-05-21T09:19:16+00:00",
+  "query": "Que es el test de Kolmogorov-Smirnov y para que sirve en la deteccion de drift?",
+  "repeats": 3,
+  "micro_aislado_ms": {
+    "retrieval": {
+      "median": 135.7,
+      "samples": [
+        137.4,
+        135.7,
+        118.4
+      ]
+    },
+    "tool_total": {
+      "median": 2313.2,
+      "samples": [
+        1973.8,
+        2866.8,
+        2313.2
+      ]
+    },
+    "inner_synthesis_estimado": 2177.5
+  },
+  "grafo_ms": {
+    "turn_total": {
+      "median": 29689.2,
+      "samples": [
+        50112.9,
+        28219.1,
+        29689.2
+      ]
+    },
+    "recuperar_contexto": {
+      "median": 5023.3,
+      "samples": [
+        5023.3,
+        4917.0,
+        5675.5
+      ]
+    },
+    "razonador_total": {
+      "median": 24007.8,
+      "samples": [
+        45083.0,
+        23295.9,
+        24007.8
+      ]
+    }
+  },
+  "trace_representativa": {
+    "trace_id": "052703cdb3184426969139e86602967a",
+    "llm_calls": [
+      {
+        "name": "razonador.llm",
+        "duration_ms": 1501.066445000106,
+        "decided": "tool_call",
+        "tool_name": "consultar_teoria",
+        "prompt_chars": 4990,
+        "output_tokens": 47
+      },
+      {
+        "name": "razonador.llm",
+        "duration_ms": 22502.322129000277,
+        "decided": "text",
+        "tool_name": null,
+        "prompt_chars": 6290,
+        "output_tokens": 192
+      }
+    ],
+    "n_eventos": 10
+  }
+}

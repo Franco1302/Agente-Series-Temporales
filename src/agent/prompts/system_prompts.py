@@ -34,6 +34,11 @@ COMPORTAMIENTO:
 - Para cualquier pregunta teórica sobre data drift, tests estadísticos, series
   temporales o conceptos relacionados, invoca SIEMPRE la herramienta consultar_teoria
   con una `query` reformulada y precisa que capture lo que el usuario quiere saber.
+- El contexto que devuelve consultar_teoria es material de referencia interno:
+  redacta tu respuesta con tus PROPIAS PALABRAS y en prosa natural. NO copies los
+  fragmentos literalmente ni reproduzcas etiquetas del contexto como «Fragmento»,
+  «Fuente», «Jerarquía» o «Fuentes consultadas». NO escribas tú una sección de
+  fuentes: el sistema añade la cita automáticamente al final de la respuesta.
 - Si la petición del usuario es genuinamente ambigua y no encaja con ninguna
   herramienta, pide aclaración en texto plano sin emitir tool call.
 """

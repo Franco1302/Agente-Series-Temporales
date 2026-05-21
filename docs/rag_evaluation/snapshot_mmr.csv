@@ -1,0 +1,21 @@
+question,expected_terms,k,total_relevant,hits,precision_at_k,recall_at_k,mrr
+Que test de drift uso con datos univariantes,kolmogorov;jensen;psi;cusum,5,37,2,0.4000,0.0541,1.0000
+Que metodo de deteccion de drift uso con datos multivariantes,mewma;hotelling,5,16,1,0.2000,0.0625,0.5000
+"Tengo varias variables correlacionadas, que test de drift aplico",mewma;hotelling,5,16,2,0.4000,0.1250,1.0000
+"Quiero detectar drift gradual y acumulado en una serie, que metodo uso",cusum;mewma,5,29,2,0.4000,0.0690,1.0000
+Cuando conviene Kolmogorov-Smirnov frente a Jensen-Shannon para drift,kolmogorov;jensen,5,25,1,0.2000,0.0400,1.0000
+Que test comparo distribuciones de probabilidad para detectar drift,jensen;kolmogorov;psi,5,29,1,0.2000,0.0345,1.0000
+Necesito un indice de estabilidad de poblacion para medir drift,psi;estabilidad,5,13,3,0.6000,0.2308,1.0000
+Como detecto un cambio abrupto en la media de una senal,cusum,5,23,2,0.4000,0.0870,0.3333
+Diferencia entre deteccion de drift univariante y multivariante,univariante;multivariante;mewma;hotelling,5,26,2,0.4000,0.0769,1.0000
+Que prueba estadistica uso para drift en una sola variable continua,kolmogorov;smirnov,5,19,1,0.2000,0.0526,1.0000
+Que modelo de forecast uso si mi serie tiene estacionalidad fuerte,sarimax;prophet,5,31,1,0.2000,0.0323,0.2000
+"Tengo regresores exogenos, que modelo de prediccion elijo",sarimax,5,23,2,0.4000,0.0870,0.5000
+Cuando conviene Prophet frente a SARIMAX,prophet;sarimax,5,31,0,0.0000,0.0000,0.0000
+"Quiero forecasting autoregresivo, que modelo uso",forecaster;autoreg,5,11,1,0.2000,0.0909,0.5000
+Que modelo de prediccion de series temporales recomiendas,sarimax;prophet;forecaster,5,33,2,0.4000,0.0606,1.0000
+Que estrategia de aumentacion de datos preserva la estructura armonica,harmonic;armonic,5,2,1,0.2000,0.5000,0.2500
+Quiero aumentar datos generando ruido con el metodo de Box-Muller,muller,5,7,0,0.0000,0.0000,0.0000
+Que estrategia de aumentacion uso para replicar muestras existentes,duplicate;duplicad,5,3,1,0.2000,0.3333,0.5000
+Como aumento datos preservando las propiedades estadisticas originales,statistical;estadistic,5,8,0,0.0000,0.0000,0.0000
+Que estrategias de aumentacion de datos existen,muller;harmonic;duplicate;statistical,5,14,0,0.0000,0.0000,0.0000

@@ -81,6 +81,46 @@ def _last_tool_message_name(messages: list) -> str | None:
     return None
 
 
+def _build_fuentes_section(messages: list) -> str | None:
+    """Extrae el bloque «Fuentes consultadas» del último ToolMessage de consultar_teoria.
+
+    Devuelve la sección ya formateada como «Fuentes:\\n- ...» lista para anexar,
+    o None si no se encuentra el bloque.
+    """
+    for msg in reversed(messages):
+        if isinstance(msg, ToolMessage) and getattr(msg, "name", None) == "consultar_teoria":
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            marker = "Fuentes consultadas:"
+            idx = content.find(marker)
+            if idx == -1:
+                return None
+            lineas = [
+                ln.strip()
+                for ln in content[idx + len(marker):].splitlines()
+                if ln.strip().startswith("-")
+            ]
+            return "Fuentes:\n" + "\n".join(lineas) if lineas else None
+    return None
+
+
+def _append_fuentes(response: AIMessage, messages: list) -> None:
+    """Anexa de forma determinista la sección Fuentes a la respuesta final.
+
+    Paso 6 del PlanMejoraRAG: la instrucción del prompt no basta con el modelo
+    3B local. Copiar las fuentes del output de ``consultar_teoria`` garantiza la
+    cita y evita que el modelo invente referencias. No-op si la respuesta ya
+    incluye la sección o si no hay bloque de fuentes que citar.
+    """
+    content = response.content
+    if not isinstance(content, str) or not content.strip():
+        return
+    if "Fuentes:" in content:  # el modelo ya la incluyó: no duplicar
+        return
+    fuentes = _build_fuentes_section(messages)
+    if fuentes:
+        response.content = content.rstrip() + "\n\n" + fuentes
+
+
 def razonador_node(state: AgentState) -> dict:
     """Invoca el LLM con el estado actual y decide la próxima acción.
 
@@ -120,7 +160,8 @@ def razonador_node(state: AgentState) -> dict:
 
     # Selección de tools: si el último ToolMessage es de consultar_teoria,
     # excluimos esa tool del bind para impedir bucles RAG → RAG → RAG.
-    if _last_tool_message_name(messages) == "consultar_teoria":
+    last_tool = _last_tool_message_name(messages)
+    if last_tool == "consultar_teoria":
         tools_for_bind = [t for t in AGENT_TOOLS if t.name != "consultar_teoria"]
     else:
         tools_for_bind = AGENT_TOOLS
@@ -148,6 +189,13 @@ def razonador_node(state: AgentState) -> dict:
 
     # Detectar si hay una tool call y si le faltan parámetros
     tool_calls = getattr(response, "tool_calls", None) or []
+
+    # Citas trazables (Paso 6): cuando el razonador cierra el ciclo RAG con la
+    # respuesta final (texto, sin tool call), se anexa la sección Fuentes de
+    # forma determinista a partir del contexto que devolvió consultar_teoria.
+    if not tool_calls and last_tool == "consultar_teoria":
+        _append_fuentes(response, messages)
+
     if tool_calls:
         call = tool_calls[0]
         tool_name = call.get("name", "") if isinstance(call, dict) else getattr(call, "name", "")
