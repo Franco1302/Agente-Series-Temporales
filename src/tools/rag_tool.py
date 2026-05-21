@@ -7,10 +7,8 @@ from contextvars import ContextVar
 from typing import Any
 
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 
-from src.config.llm_config import get_chat_ollama
 # Punto de entrada unico de recuperacion: densa / MMR / hibrida (BM25 + RRF).
 from src.rag_engine.hybrid import recuperar_documentos, resolve_search_type
 
@@ -81,31 +79,14 @@ def _build_context_fragments(documents: list[Document]) -> tuple[str, list[str]]
     return context, sources
 
 
-def _generate_grounded_answer(query: str, context: str) -> tuple[str, dict[str, Any]]:
-    """Genera la respuesta documental y extrae los metadatos de tokens de Ollama."""
-    llm = get_chat_ollama()
-    system_prompt = (
-        "Eres un asistente tecnico de Data Drift. "
-        "Responde UNICAMENTE con base en el contexto proporcionado."
-    )
-    user_prompt = f"Pregunta del usuario:\n{query.strip()}\n\nContexto recuperado:\n{context}"
-
-    response = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
-    
-    # Capturamos la metadata de uso del LLM interno de forma defensiva
-    usage = getattr(response, "usage_metadata", None) or {}
-    token_stats = {
-        "inner_input_tokens": getattr(usage, "input_tokens", None),
-        "inner_output_tokens": getattr(usage, "output_tokens", None)
-    }
-
-    answer = str(response.content).strip()
-    return answer, token_stats
-
-
 @tool
 def consultar_teoria(query: str) -> str:
-    """Consulta teoria tecnica del TFG de referencia para responder con base documental."""
+    """Consulta la base teorica del TFG y devuelve fragmentos como contexto documental.
+
+    Devuelve el contexto recuperado SIN redactar una respuesta: la sintesis la
+    realiza el razonador del grafo. Asi se evita la doble pasada de LLM
+    (PlanMejoraRAG, Paso 5), que duplicaba la latencia del turno teorico.
+    """
     clean_query = query.strip()
     if not clean_query:
         return "Error: La consulta esta vacia. Proporciona una pregunta valida."
@@ -126,29 +107,21 @@ def consultar_teoria(query: str) -> str:
 
     context, sources = _build_context_fragments(documents)
     if not context.strip():
-        return "No se encontraron fragmentos textuales utiles para construir una respuesta."
-
-    try:
-        # Recuperamos tanto la respuesta estructurada como el conteo de tokens ocultos
-        answer, token_stats = _generate_grounded_answer(clean_query, context)
-    except Exception as exc:
-        return f"Error: Se recupero contexto pero fallo la sintesis con LLM. Detalle tecnico: {exc}"
-
-    if not answer:
-        return "No se pudo generar una respuesta final a partir del contexto recuperado."
+        return "No se encontraron fragmentos textuales utiles para la consulta indicada."
 
     # ── CARGAR DATOS AL CANAL LATERAL (ContextVar) ───────────────────────────
-    # MMR / hibrido no devuelven distancias vectoriales nativas; se registra el
-    # modo de busqueda en lugar de vector_scores (nota Paso 3 PlanMejoraRAG).
+    # Ya no hay LLM interno: el ContextVar deja de exponer inner_input_tokens /
+    # inner_output_tokens. MMR / hibrido tampoco devuelven distancias nativas,
+    # asi que se registra search_type en lugar de vector_scores.
     _last_retrieval.set({
         "query": clean_query,
         "n_chunks": len(documents),
         "search_type": resolve_search_type(),
         "vector_scores": [],
         "sources": sources,
-        **token_stats
     })
     # ─────────────────────────────────────────────────────────────────────────
 
+    # Contexto estructurado: el razonador sintetiza la respuesta a partir de el.
     sources_block = "\n".join(f"- {source_line}" for source_line in sources)
-    return f"Respuesta:\n{answer}\n\nFuentes consultadas:\n{sources_block}"
+    return f"{context}\n\nFuentes consultadas:\n{sources_block}"

@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.tools.rag_tool import consultar_teoria_drift
+from src.tools.rag_tool import consultar_teoria
 
 
 @dataclass(frozen=True)
@@ -60,7 +60,7 @@ def run_quality_check() -> int:
         print(f"Consulta: {test_case.query}")
 
         try:
-            output = consultar_teoria_drift.invoke({"query": test_case.query})
+            output = consultar_teoria.invoke({"query": test_case.query})
         except Exception as exc:
             print(f"Resultado: FAIL (excepcion inesperada: {exc})")
             fail_count += 1
