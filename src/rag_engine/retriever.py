@@ -15,7 +15,7 @@ ENV_FILE = PROJECT_ROOT / ".env"
 VECTOR_DB_DIR = PROJECT_ROOT / "data" / "vector_db"
 EMBEDDING_MODEL = "nomic-embed-text"
 
-# Configuracion de busqueda (Paso 3 PlanMejoraRAG). Defaults sensatos: si no
+# Defaults sensatos: si no
 # se configura nada en .env el comportamiento es identico al historico.
 DEFAULT_SEARCH_TYPE = "similarity"
 DEFAULT_FETCH_K = 20
@@ -77,50 +77,8 @@ def _ensure_vector_db_ready(vector_db_dir: Path) -> None:
         )
 
 
-def _resolve_search_config(
-    search_type: str | None,
-    search_kwargs: dict | None,
-    top_k: int,
-) -> tuple[str, dict]:
-    """Resuelve el tipo de busqueda y los search_kwargs para ``as_retriever``.
-
-    El tipo se toma del argumento o, si es ``None``, de ``RAG_SEARCH_TYPE``
-    (.env); por defecto ``similarity``. ``hybrid`` es un modo del Paso 4
-    (fusion densa + BM25 en ``hybrid.py``): aqui el retriever solo aporta la
-    mitad densa, asi que se trata como ``similarity``. Para ``mmr`` se anaden
-    ``fetch_k`` y ``lambda_mult`` desde ``RAG_FETCH_K`` / ``RAG_MMR_LAMBDA``
-    salvo que el llamante los pase explicitamente en ``search_kwargs``.
-    """
-    requested = (search_type or os.getenv("RAG_SEARCH_TYPE") or DEFAULT_SEARCH_TYPE)
-    requested = requested.strip().lower() or DEFAULT_SEARCH_TYPE
-    if requested not in _VALID_SEARCH_TYPES:
-        requested = DEFAULT_SEARCH_TYPE
-
-    # Chroma.as_retriever solo entiende 'similarity' y 'mmr'.
-    chroma_type = "mmr" if requested == "mmr" else "similarity"
-
-    kwargs: dict = dict(search_kwargs or {})
-    kwargs.setdefault("k", top_k)
-    if chroma_type == "mmr":
-        kwargs.setdefault("fetch_k", _read_positive_int_env("RAG_FETCH_K", DEFAULT_FETCH_K))
-        kwargs.setdefault("lambda_mult", _read_float_env("RAG_MMR_LAMBDA", DEFAULT_MMR_LAMBDA))
-    return chroma_type, kwargs
-
-
-def get_retriever(
-    top_k: int = 4,
-    search_type: str | None = None,
-    search_kwargs: dict | None = None,
-) -> VectorStoreRetriever:
-    """Devuelve un retriever conectado a Chroma en modo lectura.
-
-    Parametros:
-        top_k: numero de documentos a devolver.
-        search_type: ``similarity`` | ``mmr`` | ``hybrid``. Si es ``None`` se
-            lee de ``RAG_SEARCH_TYPE`` (.env); ``hybrid`` usa la mitad densa.
-        search_kwargs: sobreescribe puntualmente ``k`` / ``fetch_k`` /
-            ``lambda_mult`` (lo no indicado se rellena con los defaults o .env).
-    """
+def get_retriever(top_k: int = 4) -> VectorStoreRetriever:
+    """Devuelve un retriever por similitud conectado a Chroma en modo lectura."""
     if top_k <= 0:
         raise ValueError("top_k debe ser mayor que 0.")
 
@@ -140,10 +98,9 @@ def get_retriever(
         create_collection_if_not_exists=False,
     )
 
-    chroma_type, resolved_kwargs = _resolve_search_config(search_type, search_kwargs, top_k)
     return vector_store.as_retriever(
-        search_type=chroma_type,
-        search_kwargs=resolved_kwargs,
+        search_type="similarity",
+        search_kwargs={"k": top_k},
     )
 
 def get_vector_store() -> Chroma:

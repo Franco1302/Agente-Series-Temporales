@@ -167,15 +167,14 @@ def _evaluate_question(
     )
 
 
-def _retrieve(retriever, query: str) -> list[str]:
-    """Recupera los chunks para la query usando el retriever configurable.
+def _retrieve(recuperar_fn, query: str, k: int) -> list[str]:
+    """Recupera los chunks para la query usando el punto de entrada unico RAG.
 
-    Punto unico de recuperacion del script. Desde el Paso 3 usa ``get_retriever``,
-    que respeta ``RAG_SEARCH_TYPE`` (``similarity`` | ``mmr``) y sus parametros.
-    En el Paso 4 se redirigira a ``hybrid.recuperar_documentos`` para evaluar
-    tambien la busqueda hibrida con la misma bateria.
+    Desde el Paso 4 delega en ``hybrid.recuperar_documentos``, que respeta
+    ``RAG_SEARCH_TYPE`` (``similarity`` | ``mmr`` | ``hybrid``). Asi la misma
+    bateria mide cualquiera de los tres modos sin tocar el script.
     """
-    documents = retriever.invoke(query)
+    documents = recuperar_fn(query, top_k=k)
     return [doc.page_content or "" for doc in documents]
 
 
@@ -395,9 +394,10 @@ def run_evaluation(
 ) -> int:
     """Ejecuta la bateria completa de evaluacion RAG. Devuelve un codigo de salida."""
     try:
-        from src.rag_engine.retriever import get_retriever, get_vector_store
+        from src.rag_engine.hybrid import recuperar_documentos
+        from src.rag_engine.retriever import get_vector_store
     except Exception as exc:  # noqa: BLE001
-        print(f"[ERROR] No se pudo importar el retriever RAG: {exc}")
+        print(f"[ERROR] No se pudo importar el subsistema RAG: {exc}")
         return 1
 
     try:
@@ -412,12 +412,6 @@ def run_evaluation(
         print("[ERROR] La coleccion Chroma esta vacia. Re-ejecuta la ingesta.")
         return 1
 
-    try:
-        retriever = get_retriever(top_k=k)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[ERROR] No se pudo construir el retriever: {exc}")
-        return 1
-
     search_type = _current_search_type()
     print(f"Corpus: {len(corpus)} chunks | dataset: {len(EVAL_DATASET)} preguntas "
           f"| k={k} | search_type={search_type}")
@@ -425,7 +419,7 @@ def run_evaluation(
     results: list[QuestionResult] = []
     for question, expected_terms in EVAL_DATASET:
         try:
-            retrieved = _retrieve(retriever, question)
+            retrieved = _retrieve(recuperar_documentos, question, k)
         except Exception as exc:  # noqa: BLE001
             print(f"[ERROR] Fallo recuperando '{question}': {exc}")
             return 1

@@ -3,23 +3,21 @@
 from __future__ import annotations
 
 import os
-import re
 from contextvars import ContextVar
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 
 from src.config.llm_config import get_chat_ollama
-# Importamos la función de base vectorial nativa que acabamos de crear
-from src.rag_engine.retriever import get_vector_store
+# Punto de entrada unico de recuperacion: densa / MMR / hibrida (BM25 + RRF).
+from src.rag_engine.hybrid import recuperar_documentos, resolve_search_type
 
 # Canal lateral asíncronamente seguro para transferir métricas entre hilos sin alterar firmas
 _last_retrieval: ContextVar[dict[str, Any] | None] = ContextVar("last_retrieval", default=None)
 
 # OPTIMIZACIÓN CRÍTICA DEL TFG: Ajustamos umbrales para mitigar los 44s de prompt ingestion
-RAG_DEFAULT_TOP_K = 6
 RAG_DEFAULT_KEEP_TOP = 3
 RAG_MAX_CONTEXT_CHARS = 3500  # Reducido de 8000 para evitar saturar la ventana de Qwen 3B
 
@@ -59,35 +57,6 @@ def _read_positive_int_env(variable_name: str, default_value: int) -> int:
         return value if value > 0 else default_value
     except ValueError:
         return default_value
-
-
-def _tokenize(text: str) -> set[str]:
-    tokens = re.findall(r"[a-zA-Z0-9áéíóúñüÁÉÍÓÚÑÜ]+", text.lower())
-    return {token for token in tokens if len(token) > 2}
-
-
-def _lexical_overlap_score(query_tokens: set[str], content: str) -> float:
-    if not query_tokens:
-        return 0.0
-    content_tokens = _tokenize(content)
-    if not content_tokens:
-        return 0.0
-    return len(query_tokens.intersection(content_tokens)) / max(1, len(query_tokens))
-
-
-def _rerank_documents(query: str, documents: list[Document], keep_top: int) -> list[Document]:
-    if not documents:
-        return documents
-    query_tokens = _tokenize(query)
-    ranked_pairs = sorted(
-        (
-            (_lexical_overlap_score(query_tokens, doc.page_content or ""), idx, doc)
-            for idx, doc in enumerate(documents)
-        ),
-        key=lambda item: (item[0], -item[1]),
-        reverse=True,
-    )
-    return [item[2] for item in ranked_pairs][: max(1, keep_top)]
 
 
 def _build_context_fragments(documents: list[Document]) -> tuple[str, list[str]]:
@@ -142,24 +111,20 @@ def consultar_teoria(query: str) -> str:
         return "Error: La consulta esta vacia. Proporciona una pregunta valida."
 
     try:
-        top_k = _read_positive_int_env("RAG_TOP_K", RAG_DEFAULT_TOP_K)
         keep_top = _read_positive_int_env("RAG_KEEP_TOP", RAG_DEFAULT_KEEP_TOP)
 
-        # Invocamos la búsqueda por similitud recuperando distancias vectoriales nativas
-        vector_store = get_vector_store()
-        docs_and_scores = vector_store.similarity_search_with_score(clean_query, k=top_k)
-        
-        documents = [doc for doc, _ in docs_and_scores]
-        vector_scores = [round(float(score), 4) for _, score in docs_and_scores]
-        
+        # Recuperacion via punto de entrada unico (densa / MMR / hibrida segun
+        # RAG_SEARCH_TYPE). La fusion hibrida ya aporta la senal lexica (BM25),
+        # por lo que se retira el reordenado lexico posterior: el barrido de
+        # docs/rag_evaluation midio que aplicarlo empeora P@k, R@k y MRR.
+        documents = recuperar_documentos(clean_query, top_k=keep_top)
     except Exception as exc:
         return f"Error: No fue posible consultar la base RAG local. Detalle tecnico: {exc}"
 
     if not documents:
         return "No se encontraron fragmentos relevantes para la consulta indicada."
 
-    selected_documents = _rerank_documents(query=clean_query, documents=documents, keep_top=keep_top)
-    context, sources = _build_context_fragments(selected_documents)
+    context, sources = _build_context_fragments(documents)
     if not context.strip():
         return "No se encontraron fragmentos textuales utiles para construir una respuesta."
 
@@ -173,11 +138,14 @@ def consultar_teoria(query: str) -> str:
         return "No se pudo generar una respuesta final a partir del contexto recuperado."
 
     # ── CARGAR DATOS AL CANAL LATERAL (ContextVar) ───────────────────────────
+    # MMR / hibrido no devuelven distancias vectoriales nativas; se registra el
+    # modo de busqueda en lugar de vector_scores (nota Paso 3 PlanMejoraRAG).
     _last_retrieval.set({
         "query": clean_query,
         "n_chunks": len(documents),
-        "vector_scores": vector_scores,
-        "sources": sources[:keep_top],
+        "search_type": resolve_search_type(),
+        "vector_scores": [],
+        "sources": sources,
         **token_stats
     })
     # ─────────────────────────────────────────────────────────────────────────
