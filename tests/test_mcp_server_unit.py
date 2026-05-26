@@ -28,7 +28,10 @@ from mcp_server.tools.exogenous import (
     _build_query_params as exo_params,
     create_exogenous_variable,
 )
-from mcp_server.tools.forecast import forecast_time_series
+from mcp_server.tools.forecast import (
+    _normalize_csv_for_backend,
+    forecast_time_series,
+)
 from mcp_server.tools.synthetic import (
     _resolve_horizon,
     generate_synthetic_arma,
@@ -373,3 +376,35 @@ async def test_forecast_no_metrics(respx_mock, sample_csv):
     )
     assert "output_path" in out
     assert out["metrics"] is None
+
+
+def test_normalize_csv_daily_passthrough():
+    """CSV diario: la normalización no toca el contenido y devuelve alias 'D'."""
+    import pandas as pd
+    idx = pd.date_range("2024-01-01", periods=10, freq="D").strftime("%Y-%m-%d")
+    csv = ("ts,v\n" + "\n".join(f"{d},{i}" for i, d in enumerate(idx))).encode()
+    new_content, alias = _normalize_csv_for_backend(csv, "ts")
+    assert alias == "D"
+    assert new_content == csv
+
+
+def test_normalize_csv_monthly_start_rewrites_to_end():
+    """CSV con fechas a inicio de mes (MS): reescribe a final de mes y devuelve 'M'."""
+    import io, pandas as pd
+    idx = pd.date_range("2020-01-01", periods=12, freq="MS").strftime("%Y-%m-%d")
+    csv = ("ts,v\n" + "\n".join(f"{d},{i}" for i, d in enumerate(idx))).encode()
+    new_content, alias = _normalize_csv_for_backend(csv, "ts")
+    assert alias == "M"
+    assert new_content != csv
+    df = pd.read_csv(io.BytesIO(new_content))
+    # Todas las fechas deben caer al final del mes (último día).
+    parsed = pd.to_datetime(df["ts"])
+    assert all(parsed.dt.is_month_end), "Las fechas deberían estar a final de mes"
+
+
+def test_normalize_csv_unknown_column_is_noop():
+    """Si la columna índice no existe, devuelve el contenido tal cual y alias None."""
+    csv = b"ts,v\n2024-01-01,1\n2024-01-02,2\n2024-01-03,3\n"
+    new_content, alias = _normalize_csv_for_backend(csv, "no_existe")
+    assert alias is None
+    assert new_content == csv

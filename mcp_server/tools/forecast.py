@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import Annotated, Literal, Optional
 
+import pandas as pd
 from pydantic import BaseModel, Field
 
 from mcp_server.config import load_settings
@@ -17,6 +19,53 @@ _SETTINGS = load_settings()
 
 _DATOS_ENDPOINT = "/Datos/Sarimax"
 _ERROR_ENDPOINT = "/Error/Sarimax"
+
+# Frecuencias que acepta el backend /Datos/Sarimax (un solo caracter).
+_BACKEND_FREQS: tuple[str, ...] = ("B", "D", "W", "M", "Q", "Y")
+# Alias 'period start' que devuelve pandas (MS, QS, YS o el legacy AS) y que el
+# backend NO acepta: requieren reescribir las fechas al final del periodo.
+_PERIOD_START_ALIASES: tuple[str, ...] = ("MS", "QS", "YS", "AS")
+
+
+def _normalize_csv_for_backend(
+    content: bytes, index_column: str,
+) -> tuple[bytes, Optional[str]]:
+    """Adapta el CSV al contrato del backend Sarimax.
+
+    El backend hace ``df.index.freq = freq`` y pandas rechaza el mismatch entre
+    fechas "start of period" (MS/QS/YS) y el alias "end of period" (M/Q/Y) que
+    es el único que el backend acepta. Si detecto ese caso, reescribo la
+    columna índice con las fechas movidas al final del periodo, y devuelvo el
+    nuevo contenido junto con el alias normalizado.
+
+    Devuelve ``(content_quizás_reescrito, freq_inferida_o_None)``. Cualquier
+    excepción se silencia: la normalización es best-effort y nunca debe abortar
+    la llamada — si no puedo inferir, devuelvo ``(content, None)`` y el caller
+    usa la frequency que ya tenía.
+    """
+    try:
+        df = pd.read_csv(io.BytesIO(content))
+        if index_column not in df.columns:
+            return content, None
+        idx_dt = pd.to_datetime(df[index_column], errors="coerce")
+        if idx_dt.isna().any() or len(idx_dt) < 3:
+            return content, None
+        freq = pd.infer_freq(idx_dt)
+        if not freq:
+            return content, None
+        # Legacy 'A' (annual, pandas <2) lo trato como 'Y'.
+        head = "Y" if freq[0].upper() == "A" else freq[0].upper()
+        if head not in _BACKEND_FREQS:
+            return content, None
+        if freq.upper() in _PERIOD_START_ALIASES and head in ("M", "Q", "Y"):
+            shifted = idx_dt.dt.to_period(head).dt.end_time.dt.normalize()
+            df[index_column] = shifted.dt.strftime("%Y-%m-%d")
+            buf = io.BytesIO()
+            df.to_csv(buf, index=False)
+            return buf.getvalue(), head
+        return content, head
+    except Exception:  # noqa: BLE001
+        return content, None
 
 
 class ForecastTimeSeriesInput(BaseModel):
@@ -82,8 +131,16 @@ async def forecast_time_series(
         )
         datos_endpoint = _DATOS_ENDPOINT
         error_endpoint = _ERROR_ENDPOINT
-        datos_params = _datos_params(inp)
         filename, content, mime = open_csv_for_upload(inp.file_path)
+
+        # El backend revienta con 500 si la frequency pasada no coincide con la
+        # inferida del índice. Normalizo: override de frequency y, si las fechas
+        # son "start of period" (MS/QS/YS), reescribo el CSV al "end".
+        content, inferred = _normalize_csv_for_backend(content, inp.index_column)
+        if inferred and inferred != inp.frequency:
+            inp = inp.model_copy(update={"frequency": inferred})
+
+        datos_params = _datos_params(inp)
 
         out_name = deterministic_filename(
             f"forecast_{inp.model}",
