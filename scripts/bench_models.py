@@ -46,7 +46,7 @@ TRIALS: list[Trial] = [
     Trial(
         "drift",
         "Analiza el drift en 'data/temp_uploads/ventas.csv' sobre la columna 'precio'.",
-        "detect_drift_kolmogorov_smirnov",
+        "detect_drift",
     ),
     Trial(
         "rag",

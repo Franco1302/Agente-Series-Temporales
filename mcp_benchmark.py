@@ -1,15 +1,32 @@
-"""
-Banco de pruebas para comparar modelos Ollama en escenarios de tool calling MCP.
+"""Banco de modelos Ollama para tool-calling sobre las herramientas MCP REALES.
 
-Salida: resultados_benchmark.csv + tabla resumen en consola.
-Uso:    python mcp_benchmark.py [--modelos modelo1 modelo2 ...]
+Mide, por cada modelo y caso, si el LLM emite la tool call esperada con los
+argumentos del usuario, midiendo además **invention_rate**: la fracción de
+casos ambiguos en los que el modelo se inventa parámetros que el usuario no
+mencionó.
+
+------
+  * ``resultados_benchmark.csv`` — una fila por (modelo, caso) con tiempo,
+    tokens/s, decisión del LLM y si inventó parámetros.
+  * Tabla en consola ordenada por score global, ahora con la columna
+    ``invention rate``.
+
+Uso
+---
+    python mcp_benchmark.py
+    python mcp_benchmark.py --modelos qwen2.5:3b-instruct-q4_K_M
+    python mcp_benchmark.py --casos 1 5   # acota TC-01 y TC-05
 """
+
+from __future__ import annotations
 
 import argparse
 import csv
 import json
+import os
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -18,8 +35,15 @@ try:
     from tabulate import tabulate
 except ImportError:
     print("ERROR: Instala las dependencias del benchmark:")
-    print("  pip install -r requirements_benchmark.txt")
+    print("  pip install ollama tabulate")
     sys.exit(1)
+
+# Necesario para que ``from src...`` funcione cuando se ejecuta como script
+# desde la raíz del proyecto (sin PYTHONPATH=.). El propio CLAUDE.md aconseja
+# PYTHONPATH=., pero el fichero se ha invocado tradicionalmente sin él.
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts._scoring_utils import evaluar_tool_call as _evaluar_tool_call
 
@@ -29,240 +53,256 @@ from scripts._scoring_utils import evaluar_tool_call as _evaluar_tool_call
 OLLAMA_HOST = "http://localhost:11434"
 
 MODELS = [
+    "qwen2.5:3b-instruct-q4_K_M",
     "qwen2.5:7b-instruct-q4_K_M",
     "llama3.1:8b-instruct-q4_K_M",
-    "qwen2.5-coder:7b-instruct-q4_K_M",
-    "mistral:7b-instruct-q4_K_M",
 ]
 
-# ── Herramientas MCP simuladas ────────────────────────────────────────────────
 
-MCP_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "detectar_drift_ks",
-            "description": (
-                "Detecta drift estadístico entre dos distribuciones de datos "
-                "usando el test de Kolmogorov-Smirnov. Retorna el p-valor y si "
-                "se detectó drift significativo."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "serie_referencia": {
-                        "type": "string",
-                        "description": "Ruta al archivo CSV con los datos históricos de referencia.",
-                    },
-                    "serie_actual": {
-                        "type": "string",
-                        "description": "Ruta al archivo CSV con los datos actuales a evaluar.",
-                    },
-                    "columna": {
-                        "type": "string",
-                        "description": "Nombre de la columna numérica a analizar.",
-                    },
-                    "umbral_pvalor": {
-                        "type": "number",
-                        "description": "Umbral de p-valor para considerar drift (default: 0.05).",
-                    },
-                },
-                "required": ["serie_referencia", "serie_actual", "columna"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "generar_serie_sintetica",
-            "description": (
-                "Genera una serie temporal sintética con la distribución "
-                "estadística especificada."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "distribucion": {
-                        "type": "string",
-                        "enum": ["normal", "uniforme", "poisson"],
-                        "description": "Tipo de distribución estadística.",
-                    },
-                    "n_puntos": {
-                        "type": "integer",
-                        "description": "Número de puntos de datos a generar.",
-                    },
-                    "semilla": {
-                        "type": "integer",
-                        "description": "Semilla para reproducibilidad (opcional).",
-                    },
-                },
-                "required": ["distribucion", "n_puntos"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "aumentar_datos_relacion_lineal",
-            "description": (
-                "Agrega columnas derivadas a un CSV usando relaciones lineales "
-                "configurables entre columnas existentes."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "archivo_csv": {
-                        "type": "string",
-                        "description": "Ruta al archivo CSV de entrada.",
-                    },
-                    "columna_origen": {
-                        "type": "string",
-                        "description": "Columna fuente para calcular la relación lineal.",
-                    },
-                    "nombre_nueva_columna": {
-                        "type": "string",
-                        "description": "Nombre de la nueva columna a crear.",
-                    },
-                    "factor": {
-                        "type": "number",
-                        "description": "Factor multiplicativo de la relación lineal.",
-                    },
-                    "offset": {
-                        "type": "number",
-                        "description": "Desplazamiento aditivo (default: 0).",
-                    },
-                },
-                "required": ["archivo_csv", "columna_origen", "nombre_nueva_columna", "factor"],
-            },
-        },
-    },
-]
+# ── Construcción de las tool specs reales desde el MCP ─────────────────────
 
-# ── Casos de prueba ───────────────────────────────────────────────────────────
+
+def _resolve_parameters(args_schema) -> dict:
+    """Devuelve el JSON Schema de los parámetros de una BaseTool de LangChain.
+
+    En este proyecto, ``langchain_mcp_adapters`` rellena ``args_schema`` con un
+    dict (no con una clase Pydantic), porque el schema viene del lado MCP.
+    Mantenemos compatibilidad con ambos formatos por robustez.
+    """
+    if args_schema is None:
+        return {"type": "object", "properties": {}}
+    if isinstance(args_schema, dict):
+        return args_schema
+    if hasattr(args_schema, "model_json_schema"):
+        try:
+            return args_schema.model_json_schema()
+        except Exception:  # noqa: BLE001
+            pass
+    return {"type": "object", "properties": {}}
+
+
+def build_mcp_tool_specs() -> list[dict]:
+    """Carga las tools reales del agente (8 MCP + 1 RAG) y las convierte al
+    formato que Ollama acepta en ``client.chat(tools=...)``.
+
+    Importar ``AGENT_TOOLS`` arranca el subproceso MCP por stdio (igual que
+    cuando arranca el grafo del agente). Es un coste de ~1-2 segundos
+    aceptable para un script de benchmark.
+    """
+    from src.agent.tools import AGENT_TOOLS  # spawn lazy del MCP subprocess
+
+    specs: list[dict] = []
+    for t in AGENT_TOOLS:
+        parameters = _resolve_parameters(getattr(t, "args_schema", None))
+        description = (t.description or t.name).strip()
+        # Ollama trunca descripciones muy largas; recortar a 1000 chars
+        if len(description) > 1000:
+            description = description[:1000].rstrip()
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": description,
+                "parameters": parameters,
+            },
+        })
+    return specs
+
+
+# Las tool specs se construyen sólo una vez al iniciar el script
+MCP_TOOLS: list[dict] = []  # se rellena en main()
+
+
+# ── Casos de prueba contra las tools REALES ────────────────────────────────
+
+# Para cada caso "happy path" damos `valores_esperados`: el evaluador medirá
+# qué porcentaje del JSON coincide con los kwargs que el usuario escribió.
+# Para los casos ambiguos `forbidden_invent` lista los parámetros que el
+# usuario NO mencionó: si aparecen en la tool call, es invención.
 
 TEST_CASES = [
+    # ── Happy path ─────────────────────────────────────────────────────────
     {
         "id": "TC-01",
-        "nombre": "Drift detection - args completos",
+        "nombre": "Drift KS con argumentos completos",
         "prompt": (
-            "Necesito que analices si existe drift estadístico entre los datos "
-            "del archivo 'ventas_enero.csv' y 'ventas_febrero.csv'. "
-            "Concretamente en la columna 'precio'. Usa un umbral de p-valor de 0.05."
+            "Analiza el drift en el fichero '/tmp/ventas.csv' usando la columna "
+            "'Indice' como índice temporal y el método KS, con umbral 0.05."
         ),
-        "herramienta_esperada": "detectar_drift_ks",
-        "args_requeridos": ["serie_referencia", "serie_actual", "columna"],
+        "herramienta_esperada": "detect_drift",
+        "args_requeridos": ["file_path", "index_column", "method"],
         "valores_esperados": {
-            "serie_referencia": "ventas_enero.csv",
-            "serie_actual": "ventas_febrero.csv",
-            "columna": "precio",
+            "file_path": "/tmp/ventas.csv",
+            "index_column": "Indice",
+            "method": "KS",
+            "threshold": 0.05,
         },
+        "forbidden_invent": [],
     },
     {
         "id": "TC-02",
-        "nombre": "Generación sintética - args mínimos",
+        "nombre": "Generación sintética Normal con parámetros completos",
         "prompt": (
-            "Genera una serie temporal sintética de 500 puntos con distribución normal."
+            "Genera una serie temporal sintética con distribución normal mu=0 "
+            "sigma=1, empezando el 2024-01-01, frecuencia diaria, 200 períodos."
         ),
-        "herramienta_esperada": "generar_serie_sintetica",
-        "args_requeridos": ["distribucion", "n_puntos"],
+        "herramienta_esperada": "generate_synthetic_distribution",
+        "args_requeridos": ["start_date", "frequency", "distribution_type", "distribution_params"],
         "valores_esperados": {
-            "distribucion": "normal",
-            "n_puntos": 500,
+            "start_date": "2024-01-01",
+            "frequency": "D",
+            "distribution_type": 1,
+            "periods": 200,
         },
+        "forbidden_invent": [],
     },
     {
         "id": "TC-03",
-        "nombre": "Aumento de datos - relación lineal",
+        "nombre": "Augmentation normal con argumentos completos",
         "prompt": (
-            "Toma el archivo 'dataset.csv' y agrega una nueva columna llamada "
-            "'precio_iva' que sea la columna 'precio_base' multiplicada por 1.21."
+            "Aumenta el fichero '/tmp/ventas.csv' con la estrategia 'normal' "
+            "añadiendo 50 nuevas observaciones, usando 'Indice' como índice "
+            "y frecuencia diaria."
         ),
-        "herramienta_esperada": "aumentar_datos_relacion_lineal",
-        "args_requeridos": ["archivo_csv", "columna_origen", "nombre_nueva_columna", "factor"],
+        "herramienta_esperada": "augment_time_series",
+        "args_requeridos": ["file_path", "index_column", "strategy", "size", "frequency"],
         "valores_esperados": {
-            "archivo_csv": "dataset.csv",
-            "columna_origen": "precio_base",
-            "nombre_nueva_columna": "precio_iva",
-            "factor": 1.21,
+            "file_path": "/tmp/ventas.csv",
+            "index_column": "Indice",
+            "strategy": "normal",
+            "size": 50,
+            "frequency": "D",
         },
+        "forbidden_invent": [],
     },
     {
         "id": "TC-04",
-        "nombre": "Herramienta correcta entre ambigüedad",
+        "nombre": "Forecast SARIMAX con argumentos completos",
         "prompt": (
-            "Quiero comparar la distribución estadística de 'temperaturas_2023.csv' "
-            "contra 'temperaturas_2024.csv' en la columna 'temp_max' para ver si "
-            "hay cambios significativos."
+            "Haz un forecast SARIMAX a 30 pasos sobre el fichero '/tmp/ventas.csv', "
+            "usando 'Indice' como índice y 'valor' como columna objetivo, frecuencia diaria."
         ),
-        "herramienta_esperada": "detectar_drift_ks",
-        "args_requeridos": ["serie_referencia", "serie_actual", "columna"],
+        "herramienta_esperada": "forecast_time_series",
+        "args_requeridos": ["file_path", "index_column", "target_column", "model", "forecast_steps"],
         "valores_esperados": {
-            "serie_referencia": "temperaturas_2023.csv",
-            "serie_actual": "temperaturas_2024.csv",
-            "columna": "temp_max",
+            "file_path": "/tmp/ventas.csv",
+            "index_column": "Indice",
+            "target_column": "valor",
+            "model": "sarimax",
+            "forecast_steps": 30,
         },
+        "forbidden_invent": [],
+    },
+
+    # ── Casos ambiguos: medir invention_rate ───────────────────────────────
+    {
+        "id": "TC-05",
+        "nombre": "AMBIGUO — 'Detecta drift' sin parámetros",
+        "prompt": "Detecta drift en mis datos.",
+        "herramienta_esperada": "detect_drift",
+        # No medimos args_requeridos en casos ambiguos: el agente NO debe pasar
+        # parámetros (los pedirá el grafo). Marcamos la lista como vacía para
+        # que `args_requeridos_presentes` valga True por convención y no
+        # arrastre el score.
+        "args_requeridos": [],
+        "valores_esperados": {},
+        "forbidden_invent": ["file_path", "index_column", "method", "threshold"],
+    },
+    {
+        "id": "TC-06",
+        "nombre": "AMBIGUO — 'Genera datos sintéticos' sin parámetros",
+        "prompt": "Genera datos sintéticos.",
+        # Hay 4 tools `generate_synthetic_*`; cualquier elección sin parámetros
+        # exigidos cuenta como tool-correcta para no penalizar arbitrariamente.
+        # Tomamos `generate_synthetic_distribution` como canónica (la más
+        # frecuente) y, en consecuencia, lo importante de este caso es la
+        # invención.
+        "herramienta_esperada": "generate_synthetic_distribution",
+        "args_requeridos": [],
+        "valores_esperados": {},
+        "forbidden_invent": [
+            "start_date", "frequency", "distribution_type", "distribution_params",
+            "periods", "end_date",
+        ],
+    },
+    {
+        "id": "TC-07",
+        "nombre": "AMBIGUO — 'Aumenta los datos' sin parámetros",
+        "prompt": "Aumenta los datos.",
+        "herramienta_esperada": "augment_time_series",
+        "args_requeridos": [],
+        "valores_esperados": {},
+        "forbidden_invent": ["file_path", "index_column", "strategy", "size", "frequency"],
     },
 ]
 
+
 SYSTEM_PROMPT = (
-    "Eres un asistente experto en análisis de datos y detección de drift estadístico. "
-    "Cuando el usuario te pida realizar una operación, usa SIEMPRE la herramienta más "
-    "apropiada disponible. No respondas en texto plano si hay una herramienta aplicable. "
-    "Extrae con precisión los parámetros del mensaje del usuario."
+    "Eres un asistente experto en análisis de series temporales y detección "
+    "de drift. Cuando el usuario te pida realizar una operación, invoca la "
+    "herramienta más apropiada. REGLA CRÍTICA: pasa SOLO los parámetros que "
+    "el usuario haya escrito explícitamente en su mensaje y OMITE el resto. "
+    "Mejor una tool call con arguments={} que con parámetros inventados."
 )
 
 
 # ── Evaluación ────────────────────────────────────────────────────────────────
 
-def _normalizar(valor):
-    """Normaliza valores para comparación flexible (str/int/float)."""
-    if isinstance(valor, str):
-        return valor.strip().lower()
-    return valor
+
+def _extract_call_name_and_args(call) -> tuple[str | None, dict]:
+    """Extrae (name, args) de un tool_call de Ollama, robusto frente a tipos."""
+    nombre = getattr(call.function, "name", None) if hasattr(call, "function") else None
+
+    args_raw = getattr(call.function, "arguments", {}) if hasattr(call, "function") else {}
+    if isinstance(args_raw, str):
+        try:
+            args = json.loads(args_raw)
+        except json.JSONDecodeError:
+            args = {}
+    elif isinstance(args_raw, dict):
+        args = args_raw
+    else:
+        args = {}
+    return nombre, args
 
 
 def evaluar_tool_call(tool_calls, caso: dict) -> dict:
-    """Evalúa si el tool call cumple los criterios del caso de prueba.
-
-    Adapta la forma Ollama (`call.function.name/arguments`) al evaluador
-    genérico de `scripts/_scoring_utils.py`.
-    """
+    """Devuelve métricas + flag de invención para un tool call de Ollama."""
+    forbidden = caso.get("forbidden_invent") or []
     if not tool_calls:
         return {
             "herramienta_invocada": None,
             "herramienta_correcta": False,
             "args_requeridos_presentes": False,
             "precision_args_pct": 0.0,
+            "inventado": False,                # sin tool call no hay invención
+            "tool_call_args_json": "{}",
         }
 
-    call = tool_calls[0]
-    nombre_tool = getattr(call.function, "name", None)
-
-    args_raw = getattr(call.function, "arguments", {})
-    if isinstance(args_raw, str):
-        try:
-            args = json.loads(args_raw)
-        except json.JSONDecodeError:
-            args = {}
-    else:
-        args = args_raw or {}
+    nombre, args = _extract_call_name_and_args(tool_calls[0])
 
     eval_dict = _evaluar_tool_call(
-        nombre_invocado=nombre_tool,
+        nombre_invocado=nombre,
         args_obtenidos=args,
         nombre_esperado=caso["herramienta_esperada"],
         args_requeridos=caso["args_requeridos"],
         valores_esperados=caso["valores_esperados"],
     )
+
+    invento = bool(forbidden) and any(k in args for k in forbidden)
+
     return {
         "herramienta_invocada": eval_dict["herramienta_invocada"],
         "herramienta_correcta": eval_dict["herramienta_correcta"],
         "args_requeridos_presentes": eval_dict["args_requeridos_presentes"],
         "precision_args_pct": eval_dict["precision_args_pct"],
+        "inventado": invento,
+        "tool_call_args_json": json.dumps(args, ensure_ascii=False),
     }
 
 
 # ── Benchmark ─────────────────────────────────────────────────────────────────
+
 
 def ejecutar_caso(client, modelo: str, caso: dict) -> dict:
     """Ejecuta un caso de prueba contra un modelo y retorna métricas."""
@@ -282,7 +322,7 @@ def ejecutar_caso(client, modelo: str, caso: dict) -> dict:
             tools=MCP_TOOLS,
             options={"temperature": 0.0},
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         error_msg = str(exc)
 
     duracion = round(time.perf_counter() - inicio, 3)
@@ -299,6 +339,9 @@ def ejecutar_caso(client, modelo: str, caso: dict) -> dict:
             "json_valido": False,
             "args_requeridos_presentes": False,
             "precision_args_pct": 0.0,
+            "inventado": False,
+            "tool_call_args_json": "{}",
+            "tiene_forbidden_invent": bool(caso.get("forbidden_invent")),
             "error": error_msg or "Sin respuesta",
         }
 
@@ -308,7 +351,7 @@ def ejecutar_caso(client, modelo: str, caso: dict) -> dict:
     tps = round(eval_count / (eval_duration_ns / 1e9), 2) if eval_duration_ns > 0 else 0.0
 
     tool_calls = getattr(response.message, "tool_calls", None)
-    json_valido = tool_calls is not None and len(tool_calls) > 0
+    json_valido = bool(tool_calls)
 
     evaluacion = evaluar_tool_call(tool_calls, caso)
 
@@ -323,6 +366,9 @@ def ejecutar_caso(client, modelo: str, caso: dict) -> dict:
         "json_valido": json_valido,
         "args_requeridos_presentes": evaluacion["args_requeridos_presentes"],
         "precision_args_pct": evaluacion["precision_args_pct"],
+        "inventado": evaluacion["inventado"],
+        "tool_call_args_json": evaluacion["tool_call_args_json"],
+        "tiene_forbidden_invent": bool(caso.get("forbidden_invent")),
         "error": "",
     }
 
@@ -331,14 +377,17 @@ def verificar_modelo_disponible(client, modelo: str) -> bool:
     try:
         modelos_locales = [m.model for m in client.list().models]
         return any(modelo in m for m in modelos_locales)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
 def calcular_score_global(resultados: list[dict]) -> dict[str, float]:
-    """Score ponderado por modelo: herramienta_correcta×40 + args×30 + precision×30."""
-    from collections import defaultdict
-    scores = defaultdict(list)
+    """Score ponderado 40/30/30 por modelo (no se altera por la Tarea 4).
+
+    score = herramienta_correcta × 40 + args_requeridos_presentes × 30 +
+            precision_args_pct × 0.30
+    """
+    scores: dict[str, list[float]] = defaultdict(list)
     for r in resultados:
         if r["error"]:
             scores[r["modelo"]].append(0.0)
@@ -352,28 +401,59 @@ def calcular_score_global(resultados: list[dict]) -> dict[str, float]:
     return {m: round(sum(v) / len(v), 1) for m, v in scores.items()}
 
 
+def calcular_invention_rate(resultados: list[dict]) -> dict[str, float]:
+    """Fracción de casos con ``forbidden_invent`` no vacía donde el modelo
+    metió en la tool call alguno de los parámetros prohibidos.
+
+    Solo entran al denominador los casos cuyo set ``forbidden_invent`` es no
+    vacío (los demás no aportan información sobre invención). Si un modelo no
+    tiene ninguno de esos casos en su corrida, devolvemos ``nan`` para que
+    la celda salga vacía en la tabla.
+    """
+    by_model: dict[str, list[dict]] = defaultdict(list)
+    for r in resultados:
+        if r.get("tiene_forbidden_invent"):
+            by_model[r["modelo"]].append(r)
+    rates: dict[str, float] = {}
+    for modelo, rs in by_model.items():
+        if not rs:
+            rates[modelo] = float("nan")
+            continue
+        n_inv = sum(1 for r in rs if r["inventado"])
+        rates[modelo] = round(n_inv / len(rs), 3)
+    return rates
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
-def main():
-    parser = argparse.ArgumentParser(description="Benchmark MCP tool calling para modelos Ollama")
+
+def main() -> None:
+    global MCP_TOOLS
+
+    parser = argparse.ArgumentParser(description="Benchmark MCP tool calling (tools reales)")
     parser.add_argument(
         "--modelos", nargs="+", default=MODELS,
-        help="Lista de modelos a evaluar (default: todos en MODELS)"
+        help="Lista de modelos a evaluar (default: todos en MODELS)",
     )
     parser.add_argument(
         "--casos", nargs="+", type=int,
-        help="IDs de casos a ejecutar, ej: --casos 1 3 (default: todos)"
+        help="Sufijos numéricos de los casos a ejecutar, ej: --casos 1 5 (default: todos)",
     )
     parser.add_argument(
         "--salida", default="resultados_benchmark.csv",
-        help="Nombre del archivo CSV de salida"
+        help="Nombre del archivo CSV de salida",
     )
     args = parser.parse_args()
 
+    # Carga las tool specs reales (arranca el subproceso MCP)
+    print("[mcp_benchmark] cargando tool specs desde AGENT_TOOLS (MCP)…")
+    MCP_TOOLS = build_mcp_tool_specs()
+    print(f"[mcp_benchmark] {len(MCP_TOOLS)} tools cargadas: "
+          f"{', '.join(t['function']['name'] for t in MCP_TOOLS)}")
+
     client = ollama.Client(host=OLLAMA_HOST)
 
-    # Filtrar modelos disponibles
-    modelos_a_probar = []
+    modelos_a_probar: list[str] = []
     for m in args.modelos:
         if verificar_modelo_disponible(client, m):
             modelos_a_probar.append(m)
@@ -384,19 +464,18 @@ def main():
         print("ERROR: Ningún modelo disponible. Ejecuta setup_models.sh primero.")
         sys.exit(1)
 
-    # Filtrar casos
     casos_a_probar = TEST_CASES
     if args.casos:
         casos_a_probar = [c for c in TEST_CASES if int(c["id"].split("-")[1]) in args.casos]
 
-    print(f"\n{'='*65}")
+    print(f"\n{'=' * 70}")
     print(f"  MCP Tool Calling Benchmark  —  {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"{'='*65}")
-    print(f"  Modelos: {len(modelos_a_probar)}  |  Casos: {len(casos_a_probar)}")
-    print(f"  Total iteraciones: {len(modelos_a_probar) * len(casos_a_probar)}")
-    print(f"{'='*65}\n")
+    print(f"{'=' * 70}")
+    print(f"  Modelos: {len(modelos_a_probar)}  |  Casos: {len(casos_a_probar)}  "
+          f"|  Total iter: {len(modelos_a_probar) * len(casos_a_probar)}")
+    print(f"{'=' * 70}\n")
 
-    resultados = []
+    resultados: list[dict] = []
     total = len(modelos_a_probar) * len(casos_a_probar)
     idx = 0
 
@@ -407,11 +486,12 @@ def main():
             r = ejecutar_caso(client, modelo, caso)
             resultados.append(r)
 
-            estado = "✓" if r["herramienta_correcta"] else "✗"
+            estado = "OK" if r["herramienta_correcta"] else "--"
+            inv_marker = "  INV!" if r["inventado"] else ""
             print(
-                f"        {estado} Tool: {r['herramienta_invocada'] or 'ninguna'} | "
+                f"        [{estado}] Tool: {r['herramienta_invocada'] or 'ninguna':<35} "
                 f"{r['tiempo_s']}s | {r['tokens_por_s']} t/s | "
-                f"Precisión args: {r['precision_args_pct']}%"
+                f"prec.args: {r['precision_args_pct']}%{inv_marker}"
             )
             if r["error"]:
                 print(f"        ERROR: {r['error']}")
@@ -422,7 +502,8 @@ def main():
     campos = [
         "modelo", "caso_id", "caso_nombre", "tiempo_s", "tokens_por_s",
         "herramienta_invocada", "herramienta_correcta", "json_valido",
-        "args_requeridos_presentes", "precision_args_pct", "error",
+        "args_requeridos_presentes", "precision_args_pct",
+        "inventado", "tiene_forbidden_invent", "tool_call_args_json", "error",
     ]
     with salida.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=campos)
@@ -430,19 +511,24 @@ def main():
         writer.writerows(resultados)
     print(f"Resultados guardados en: {salida.resolve()}\n")
 
-    # ── Tabla resumen ─────────────────────────────────────────────────────────
+    # ── Tabla resumen (40/30/30 intacto + columna invention rate) ─────────────
     scores = calcular_score_global(resultados)
+    inventiones = calcular_invention_rate(resultados)
 
     resumen = []
     for modelo in modelos_a_probar:
         mrs = [r for r in resultados if r["modelo"] == modelo]
+        n = len(mrs) or 1
+        inv = inventiones.get(modelo, float("nan"))
+        inv_str = "n/a" if inv != inv else f"{inv * 100:.1f}%"  # NaN check
         resumen.append([
             modelo,
-            f"{sum(r['tiempo_s'] for r in mrs) / len(mrs):.2f}",
-            f"{sum(r['tokens_por_s'] for r in mrs) / len(mrs):.1f}",
-            f"{sum(1 for r in mrs if r['herramienta_correcta'])}/{len(mrs)}",
-            f"{sum(1 for r in mrs if r['args_requeridos_presentes'])}/{len(mrs)}",
-            f"{sum(r['precision_args_pct'] for r in mrs) / len(mrs):.1f}%",
+            f"{sum(r['tiempo_s'] for r in mrs) / n:.2f}",
+            f"{sum(r['tokens_por_s'] for r in mrs) / n:.1f}",
+            f"{sum(1 for r in mrs if r['herramienta_correcta'])}/{n}",
+            f"{sum(1 for r in mrs if r['args_requeridos_presentes'])}/{n}",
+            f"{sum(r['precision_args_pct'] for r in mrs) / n:.1f}%",
+            inv_str,
             f"{scores[modelo]}/100",
         ])
 
@@ -452,13 +538,15 @@ def main():
         resumen,
         headers=[
             "Modelo", "Tiempo medio(s)", "t/s medio",
-            "Tool correcta", "Args presentes", "Precisión args", "Score global",
+            "Tool correcta", "Args presentes", "Precisión args",
+            "Invention rate", "Score global",
         ],
         tablefmt="rounded_outline",
     ))
 
     ganador = resumen[0][0]
-    print(f"\nModelo recomendado: {ganador}  (score: {resumen[0][-1]})\n")
+    print(f"\nModelo recomendado: {ganador}  (score: {resumen[0][-1]}, "
+          f"invention rate: {resumen[0][-2]})\n")
 
 
 if __name__ == "__main__":

@@ -93,7 +93,9 @@ def test_drift_params_mewma():
     inp = DetectDriftInput(file_path="/tmp/x.csv", index_column="ts", method="MEWMA")
     params = drift_params(inp)
     assert params["min_instances"] == 100
-    assert params["alpha"] == 0
+    # _build_query_params asigna 0.05 cuando alpha no se proporciona explícitamente
+    # (ver mcp_server/tools/drift.py: "params['alpha'] = inp.alpha if inp.alpha is not None else 0.05").
+    assert params["alpha"] == 0.05
     assert params["lambd"] == 0.5
 
 

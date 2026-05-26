@@ -1,0 +1,822 @@
+/home/franco/Documentos/TFG/.venv/lib/python3.12/site-packages/langgraph/checkpoint/base/__init__.py:17: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.
+  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+[05/25/26 23:19:37] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:19:37] INFO     HTTP Request: GET                   _client.py:1740
+                             http://localhost:8017/Datos/distrib                
+                             ucion/periodos?inicio=2024-01-01&fr                
+                             eq=D&distr=1&columna=valor&params=0                
+                             .0&params=1.0&periodos=200                         
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:19:38] INFO     HTTP Request: GET                   _client.py:1740
+                             http://localhost:8017/Plot/distribu                
+                             cion/periodos?inicio=2024-01-01&fre                
+                             q=D&distr=1&columna=valor&params=0.                
+                             0&params=1.0&periodos=200 "HTTP/1.1                
+                             200 OK"                                            
+[ambiguity_eval] model=qwen2.5:3b-instruct-q4_K_M temperature=0.1 reps=5 commit=415cb24
+[ambiguity_eval] casos=15  total runs=75  run_id=qwen2.5_3b-instruct-q4_K_M-1779743978
+  [MP-01] rep 1/5                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=detect_drift               inv=0 ask=1 (0.71s)
+  [MP-01] rep 2/5[05/25/26 23:19:39] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=detect_drift               inv=0 ask=1 (0.49s)
+  [MP-01] rep 3/5                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=detect_drift               inv=0 ask=1 (0.44s)
+  [MP-01] rep 4/5[05/25/26 23:19:40] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=detect_drift               inv=0 ask=1 (0.43s)
+  [MP-01] rep 5/5                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=detect_drift               inv=0 ask=1 (0.48s)
+  [MP-02] rep 1/5[05/25/26 23:19:41] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.54s)
+  [MP-02] rep 2/5[05/25/26 23:19:42] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.17s)
+  [MP-02] rep 3/5[05/25/26 23:19:43] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.33s)
+  [MP-02] rep 4/5[05/25/26 23:19:45] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.44s)
+  [MP-02] rep 5/5[05/25/26 23:19:46] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.36s)
+  [MP-03] rep 1/5[05/25/26 23:19:48] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (2.43s)
+  [MP-03] rep 2/5[05/25/26 23:19:50] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.73s)
+  [MP-03] rep 3/5[05/25/26 23:19:52] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.83s)
+  [MP-03] rep 4/5[05/25/26 23:19:54] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.72s)
+  [MP-03] rep 5/5[05/25/26 23:19:55] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.84s)
+  [MP-04] rep 1/5[05/25/26 23:19:57] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.71s)
+  [MP-04] rep 2/5[05/25/26 23:19:59] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.57s)
+  [MP-04] rep 3/5[05/25/26 23:20:00] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.96s)
+  [MP-04] rep 4/5[05/25/26 23:20:02] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (2.11s)
+  [MP-04] rep 5/5[05/25/26 23:20:05] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (2.16s)
+  [AT-01] rep 1/5[05/25/26 23:20:07] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=generate_synthetic_distribution inv=0 ask=1 (0.57s)
+  [AT-01] rep 2/5                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=generate_synthetic_distribution inv=0 ask=1 (0.48s)
+  [AT-01] rep 3/5[05/25/26 23:20:08] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=generate_synthetic_distribution inv=0 ask=1 (0.5s)
+  [AT-01] rep 4/5[05/25/26 23:20:09] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=generate_synthetic_distribution inv=0 ask=1 (0.47s)
+  [AT-01] rep 5/5                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=generate_synthetic_distribution inv=0 ask=1 (0.51s)
+  [AT-02] rep 1/5                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.77s)
+  [AT-02] rep 2/5[05/25/26 23:20:11] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (2.54s)
+  [AT-02] rep 3/5[05/25/26 23:20:14] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (2.53s)
+  [AT-02] rep 4/5[05/25/26 23:20:16] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.61s)
+  [AT-02] rep 5/5[05/25/26 23:20:18] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.58s)
+  [AT-03] rep 1/5[05/25/26 23:20:20] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.45s)
+  [AT-03] rep 2/5[05/25/26 23:20:21] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.41s)
+  [AT-03] rep 3/5[05/25/26 23:20:22] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.63s)
+  [AT-03] rep 4/5[05/25/26 23:20:24] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (2.22s)
+  [AT-03] rep 5/5[05/25/26 23:20:26] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (2.66s)
+  [AT-04] rep 1/5[05/25/26 23:20:30] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.18s)
+  [AT-04] rep 2/5                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=generate_synthetic_trend   inv=0 ask=1 (0.46s)
+  [AT-04] rep 3/5[05/25/26 23:20:31] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=generate_synthetic_trend   inv=0 ask=1 (0.5s)
+  [AT-04] rep 4/5                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=generate_synthetic_trend   inv=0 ask=1 (0.51s)
+  [AT-04] rep 5/5[05/25/26 23:20:32] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=solicitar_parametros   tool=generate_synthetic_trend   inv=0 ask=1 (0.5s)
+  [TH-01] rep 1/5[05/25/26 23:20:33] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:20:35] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/embed                   
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:20:41] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=recuperar_contexto     tool=consultar_teoria           inv=0 ask=0 (13.3s)
+  [TH-01] rep 2/5[05/25/26 23:20:47] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/embed                   
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:20:53] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=recuperar_contexto     tool=consultar_teoria           inv=0 ask=0 (12.21s)
+  [TH-01] rep 3/5[05/25/26 23:20:59] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/embed                   
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:21:05] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=recuperar_contexto     tool=consultar_teoria           inv=0 ask=0 (10.86s)
+  [TH-01] rep 4/5[05/25/26 23:21:10] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/embed                   
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:21:16] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=recuperar_contexto     tool=consultar_teoria           inv=0 ask=0 (10.79s)
+  [TH-01] rep 5/5[05/25/26 23:21:21] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/embed                   
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:21:27] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=recuperar_contexto     tool=consultar_teoria           inv=0 ask=0 (12.37s)
+  [TH-02] rep 1/5[05/25/26 23:21:33] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/embed                   
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:21:38] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=recuperar_contexto     tool=consultar_teoria           inv=0 ask=0 (11.47s)
+  [TH-02] rep 2/5[05/25/26 23:21:44] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:21:45] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/embed                   
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:21:50] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=recuperar_contexto     tool=consultar_teoria           inv=0 ask=0 (10.07s)
+  [TH-02] rep 3/5[05/25/26 23:21:54] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:21:55] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/embed                   
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:22:00] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=recuperar_contexto     tool=consultar_teoria           inv=0 ask=0 (11.83s)
+  [TH-02] rep 4/5[05/25/26 23:22:06] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/embed                   
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:22:12] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=recuperar_contexto     tool=consultar_teoria           inv=0 ask=0 (10.06s)
+  [TH-02] rep 5/5[05/25/26 23:22:16] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:22:17] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/embed                   
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:22:22] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=recuperar_contexto     tool=consultar_teoria           inv=0 ask=0 (10.95s)
+  [TH-03] rep 1/5[05/25/26 23:22:27] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (2.68s)
+  [TH-03] rep 2/5[05/25/26 23:22:29] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.8s)
+  [TH-03] rep 3/5[05/25/26 23:22:31] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (3.33s)
+  [TH-03] rep 4/5[05/25/26 23:22:34] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (1.13s)
+  [TH-03] rep 5/5[05/25/26 23:22:35] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=fin_texto              tool=-                          inv=0 ask=0 (2.66s)
+  [OS-01] rep 1/5[05/25/26 23:22:38] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=fin_texto              tool=-                          inv=0 ask=0 (2.35s)
+  [OS-01] rep 2/5[05/25/26 23:22:40] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=fin_texto              tool=-                          inv=0 ask=0 (2.94s)
+  [OS-01] rep 3/5[05/25/26 23:22:43] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=fin_texto              tool=-                          inv=0 ask=0 (2.75s)
+  [OS-01] rep 4/5[05/25/26 23:22:46] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=fin_texto              tool=-                          inv=0 ask=0 (1.39s)
+  [OS-01] rep 5/5[05/25/26 23:22:47] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=fin_texto              tool=-                          inv=0 ask=0 (2.11s)
+  [OS-02] rep 1/5[05/25/26 23:22:50] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:22:52] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/embed                   
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:22:55] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=recuperar_contexto     tool=consultar_teoria           inv=0 ask=0 (9.68s)
+  [OS-02] rep 2/5[05/25/26 23:23:00] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=fin_texto              tool=-                          inv=0 ask=0 (1.09s)
+  [OS-02] rep 3/5                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=fin_texto              tool=-                          inv=0 ask=0 (0.3s)
+  [OS-02] rep 4/5                    INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=fin_texto              tool=-                          inv=0 ask=0 (0.33s)
+  [OS-02] rep 5/5[05/25/26 23:23:01] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=fin_texto              tool=-                          inv=0 ask=0 (0.3s)
+  [IC-01] rep 1/5[05/25/26 23:23:17] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:23:18] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: POST                  _client.py:1740
+                             http://localhost:8017/Deteccion/KS?                
+                             indice=Indice&inicio=1&threshold_ks                
+                             =0.05 "HTTP/1.1 200 OK"                            
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:23:36] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:23:58] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:23:58] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: POST                  _client.py:1740
+                             http://localhost:8017/Deteccion/PSI                
+                             ?indice=Indice&inicio=1&threshold_p                
+                             si=0.25&num_bins=10 "HTTP/1.1 200                  
+                             OK"                                                
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:24:19] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=ejecutar_herramienta   tool=detect_drift               inv=0 ask=0 (44.2s)
+  [IC-01] rep 2/5[05/25/26 23:24:40] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:24:41] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: POST                  _client.py:1740
+                             http://localhost:8017/Deteccion/KS?                
+                             indice=Indice&inicio=1&threshold_ks                
+                             =0.05 "HTTP/1.1 200 OK"                            
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:24:58] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:25:20] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:25:21] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: POST                  _client.py:1740
+                             http://localhost:8017/Deteccion/PSI                
+                             ?indice=Indice&inicio=1&threshold_p                
+                             si=0.25&num_bins=10 "HTTP/1.1 200                  
+                             OK"                                                
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:25:41] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=ejecutar_herramienta   tool=detect_drift               inv=0 ask=0 (42.48s)
+  [IC-01] rep 3/5[05/25/26 23:26:01] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:26:01] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: POST                  _client.py:1740
+                             http://localhost:8017/Deteccion/KS?                
+                             indice=Indice&inicio=1&threshold_ks                
+                             =0.05 "HTTP/1.1 200 OK"                            
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:26:19] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:26:40] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:26:41] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: POST                  _client.py:1740
+                             http://localhost:8017/Deteccion/PSI                
+                             ?indice=Indice&inicio=1&threshold_p                
+                             si=0.25&num_bins=10 "HTTP/1.1 200                  
+                             OK"                                                
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:27:01] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=ejecutar_herramienta   tool=detect_drift               inv=0 ask=0 (42.94s)
+  [IC-01] rep 4/5[05/25/26 23:27:22] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:27:22] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: POST                  _client.py:1740
+                             http://localhost:8017/Deteccion/KS?                
+                             indice=Indice&inicio=1&threshold_ks                
+                             =0.05 "HTTP/1.1 200 OK"                            
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:27:40] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:28:02] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:28:02] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+[05/25/26 23:28:03] INFO     HTTP Request: POST                  _client.py:1740
+                             http://localhost:8017/Deteccion/PSI                
+                             ?indice=Indice&inicio=1&threshold_p                
+                             si=0.25&num_bins=10 "HTTP/1.1 200                  
+                             OK"                                                
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:28:22] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=ejecutar_herramienta   tool=detect_drift               inv=0 ask=0 (42.24s)
+  [IC-01] rep 5/5[05/25/26 23:28:42] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:28:43] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: POST                  _client.py:1740
+                             http://localhost:8017/Deteccion/KS?                
+                             indice=Indice&inicio=1&threshold_ks                
+                             =0.05 "HTTP/1.1 200 OK"                            
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:29:01] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:29:23] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:29:24] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: POST                  _client.py:1740
+                             http://localhost:8017/Deteccion/PSI                
+                             ?indice=Indice&inicio=1&threshold_p                
+                             si=0.25&num_bins=10 "HTTP/1.1 200                  
+                             OK"                                                
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:29:44] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=ejecutar_herramienta   tool=detect_drift               inv=0 ask=0 (43.33s)
+  [IC-02] rep 1/5[05/25/26 23:30:04] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:30:05] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:30:22] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:30:25] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             http://localhost:8017/Datos/distrib                
+                             ucion/periodos?inicio=2024-01-01&fr                
+                             eq=D&distr=1&columna=valor&periodos                
+                             =100 "HTTP/1.1 500 Internal Server                 
+                             Error"                                             
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:30:25] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:30:45] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:30:48] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             http://localhost:8017/Datos/distrib                
+                             ucion/periodos?inicio=2024-01-01&fr                
+                             eq=D&distr=1&columna=valor&periodos                
+                             =30 "HTTP/1.1 500 Internal Server                  
+                             Error"                                             
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:31:06] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=ejecutar_herramienta   tool=generate_synthetic_distribution inv=0 ask=0 (40.46s)
+  [IC-02] rep 2/5[05/25/26 23:31:25] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:31:25] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:31:42] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:32:01] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:32:01] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             http://localhost:8017/Datos/distrib                
+                             ucion/periodos?inicio=2024-01-01&fr                
+                             eq=D&distr=1&columna=valor&periodos                
+                             =30 "HTTP/1.1 500 Internal Server                  
+                             Error"                                             
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:32:19] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=ejecutar_herramienta   tool=generate_synthetic_distribution inv=0 ask=0 (36.19s)
+  [IC-02] rep 3/5[05/25/26 23:32:36] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:32:37] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:32:53] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:32:57] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             http://localhost:8017/Datos/distrib                
+                             ucion/periodos?inicio=2024-01-01&fr                
+                             eq=D&distr=1&columna=valor&periodos                
+                             =100 "HTTP/1.1 500 Internal Server                 
+                             Error"                                             
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:32:57] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:33:15] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:33:18] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             http://localhost:8017/Datos/distrib                
+                             ucion/periodos?inicio=2024-01-01&fr                
+                             eq=D&distr=1&columna=valor&periodos                
+                             =30 "HTTP/1.1 500 Internal Server                  
+                             Error"                                             
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:33:36] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=ejecutar_herramienta   tool=generate_synthetic_distribution inv=0 ask=0 (39.06s)
+  [IC-02] rep 4/5[05/25/26 23:33:53] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:33:54] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:34:11] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:34:14] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             http://localhost:8017/Datos/distrib                
+                             ucion/periodos?inicio=2024-01-01&fr                
+                             eq=D&distr=1&columna=valor&periodos                
+                             =100 "HTTP/1.1 500 Internal Server                 
+                             Error"                                             
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:34:15] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:34:18] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             http://localhost:8017/Datos/distrib                
+                             ucion/periodos?inicio=2024-01-01&fr                
+                             eq=D&distr=1&columna=valor&periodos                
+                             =100 "HTTP/1.1 500 Internal Server                 
+                             Error"                                             
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:34:19] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:34:39] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:34:41] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             http://localhost:8017/Datos/distrib                
+                             ucion/periodos?inicio=2024-01-01&fr                
+                             eq=D&distr=1&columna=valor&periodos                
+                             =30 "HTTP/1.1 500 Internal Server                  
+                             Error"                                             
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:35:01] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [--] route=solicitar_parametros   tool=generate_synthetic_distribution inv=0 ask=1 (42.1s)
+  [IC-02] rep 5/5[05/25/26 23:35:19] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:35:20] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:35:37] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:35:54] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+[05/25/26 23:35:55] INFO     Iniciando servidor MCP. API URL:       server.py:28
+                             http://localhost:8017                              
+                    INFO     Workspace:                             server.py:29
+                             /home/franco/Documentos/TFG/data/temp_             
+                             uploads                                            
+                    INFO     Processing request of type            server.py:727
+                             CallToolRequest                                    
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             http://localhost:8017/Datos/distrib                
+                             ucion/periodos?inicio=2024-01-01&fr                
+                             eq=D&distr=1&columna=valor&periodos                
+                             =30 "HTTP/1.1 500 Internal Server                  
+                             Error"                                             
+                    INFO     Processing request of type            server.py:727
+                             ListToolsRequest                                   
+[05/25/26 23:36:13] INFO     HTTP Request: POST                  _client.py:1025
+                             http://localhost:11434/api/chat                    
+                             "HTTP/1.1 200 OK"                                  
+  [OK] route=ejecutar_herramienta   tool=generate_synthetic_distribution inv=0 ask=0 (35.68s)
+
+  Scorecard escrito en tests/results/ambiguity_scorecard.csv
+  Summary escrito en   tests/results/ambiguity_summary.csv
+
+===============================================================================================
+RESUMEN AGREGADO (por case_type)
+===============================================================================================
+  case_type             n     inv  cor.ask  over.ask  rout.acc  mean(s)
+-----------------------------------------------------------------------------------------------
+  missing_param        20   0.000     0.25       n/a     0.250     1.42
+  ambiguous_tool       20   0.000     0.45       n/a     0.450     1.25
+  theory_vs_op         15   0.000      n/a       0.0     0.667     8.37
+  out_of_scope         10   0.000      n/a       0.0     0.900     2.32
+  implicit_context     10   0.000      n/a       0.1     0.900    40.87
+  total                75   0.000     0.35    0.0286     0.560     8.15
+===============================================================================================

@@ -1,0 +1,132 @@
+{
+  "_description": "Campos: id (str), case_type (str), prompt (str), expected_route (str entre 'solicitar_parametros'|'recuperar_contexto'|'ejecutar_herramienta'|'fin_texto'), must_ask (bool: el agente DEBE pedir datos), forbidden_invent (lista de nombres de parámetros que NO debe inventar en la tool call), prev_turn (opcional, str: turno previo del usuario que el agente debe haber atendido antes; el harness lo replay en el mismo thread_id para que MemorySaver lo recuerde).",
+
+  "cases": [
+    {
+      "id": "MP-01",
+      "case_type": "missing_param",
+      "prompt": "Detecta drift en mis datos.",
+      "expected_route": "solicitar_parametros",
+      "must_ask": true,
+      "forbidden_invent": ["file_path", "index_column", "method"]
+    },
+    {
+      "id": "MP-02",
+      "case_type": "missing_param",
+      "prompt": "Aumenta los datos.",
+      "expected_route": "solicitar_parametros",
+      "must_ask": true,
+      "forbidden_invent": ["file_path", "index_column", "strategy", "size", "frequency"]
+    },
+    {
+      "id": "MP-03",
+      "case_type": "missing_param",
+      "prompt": "Predice el futuro de mi serie temporal.",
+      "expected_route": "solicitar_parametros",
+      "must_ask": true,
+      "forbidden_invent": ["file_path", "index_column", "target_column", "model", "forecast_steps"]
+    },
+    {
+      "id": "MP-04",
+      "case_type": "missing_param",
+      "prompt": "Añade una variable exógena al dataset.",
+      "expected_route": "solicitar_parametros",
+      "must_ask": true,
+      "forbidden_invent": ["file_path", "index_column", "new_column_name", "relation"]
+    },
+
+    {
+      "id": "AT-01",
+      "case_type": "ambiguous_tool",
+      "prompt": "Genera datos sintéticos.",
+      "expected_route": "solicitar_parametros",
+      "must_ask": true,
+      "forbidden_invent": ["start_date", "frequency", "distribution_type", "distribution_params", "period_length", "trend_type", "trend_params"]
+    },
+    {
+      "id": "AT-02",
+      "case_type": "ambiguous_tool",
+      "prompt": "Necesito ampliar mi serie temporal con más observaciones.",
+      "expected_route": "solicitar_parametros",
+      "must_ask": true,
+      "forbidden_invent": ["file_path", "index_column", "strategy", "size", "frequency", "model", "forecast_steps"]
+    },
+    {
+      "id": "AT-03",
+      "case_type": "ambiguous_tool",
+      "prompt": "Quiero modelar mi serie temporal.",
+      "expected_route": "solicitar_parametros",
+      "must_ask": true,
+      "forbidden_invent": ["file_path", "index_column", "model", "forecast_steps", "target_column"]
+    },
+    {
+      "id": "AT-04",
+      "case_type": "ambiguous_tool",
+      "prompt": "Genera una serie con tendencia.",
+      "expected_route": "solicitar_parametros",
+      "must_ask": true,
+      "forbidden_invent": ["start_date", "frequency", "trend_type", "trend_params"]
+    },
+
+    {
+      "id": "TH-01",
+      "case_type": "theory_vs_op",
+      "prompt": "¿Qué es el p-valor en un test estadístico?",
+      "expected_route": "recuperar_contexto",
+      "must_ask": false,
+      "forbidden_invent": []
+    },
+    {
+      "id": "TH-02",
+      "case_type": "theory_vs_op",
+      "prompt": "Explícame qué es el test de Kolmogorov-Smirnov.",
+      "expected_route": "recuperar_contexto",
+      "must_ask": false,
+      "forbidden_invent": []
+    },
+    {
+      "id": "TH-03",
+      "case_type": "theory_vs_op",
+      "prompt": "¿Qué método de detección de drift debo usar si tengo varias variables correlacionadas?",
+      "expected_route": "recuperar_contexto",
+      "must_ask": false,
+      "forbidden_invent": []
+    },
+
+    {
+      "id": "OS-01",
+      "case_type": "out_of_scope",
+      "prompt": "¿Cuál será el precio del Bitcoin la próxima semana?",
+      "expected_route": "fin_texto",
+      "must_ask": false,
+      "forbidden_invent": []
+    },
+    {
+      "id": "OS-02",
+      "case_type": "out_of_scope",
+      "prompt": "Tradúceme este párrafo al inglés: 'el cielo es azul'.",
+      "expected_route": "fin_texto",
+      "must_ask": false,
+      "forbidden_invent": []
+    },
+
+    {
+      "id": "IC-01",
+      "case_type": "implicit_context",
+      "prev_turn": "Detecta el drift en '{fixture_csv}' usando la columna 'Indice' como índice y el método KS con umbral 0.05.",
+      "prompt": "Ahora hazlo con el método PSI.",
+      "expected_route": "ejecutar_herramienta",
+      "must_ask": false,
+      "forbidden_invent": []
+    },
+    {
+      "id": "IC-02",
+      "case_type": "implicit_context",
+      "prev_turn": "Genera una serie temporal sintética con distribución normal (mu=0, sigma=1) empezando el 2024-01-01, con 100 periodos diarios.",
+      "prompt": "Genera otra igual pero con 30 puntos.",
+      "expected_route": "ejecutar_herramienta",
+      "must_ask": false,
+      "forbidden_invent": []
+    }
+  ]
+}
