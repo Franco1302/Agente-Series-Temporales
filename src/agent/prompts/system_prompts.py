@@ -82,7 +82,8 @@ Ejemplo (forecast):
 **RESULTADO:** Predicción a 12 pasos generada con SARIMAX (MAE 4.1, RMSE 5.8).
 **INTERPRETACIÓN:** El modelo anticipa la evolución de la serie con un error
 medio de unas 4 unidades, un margen moderado.
-**SIGUIENTE PASO:** Compara con Prophet si necesitas más precisión."""
+**SIGUIENTE PASO:** Reentrena el modelo con datos más recientes si el error
+empieza a crecer en producción."""
 
 
 # ── Bloques fijos del prompt ────────────────────────────────────────────────
@@ -147,10 +148,9 @@ _TOOLS_1_TO_8 = """\
    Requiere: file_path, index_column, new_column_name, relation ∈
    {pca, correlation, covariance, linear, polynomial}.
 
-8. forecast_time_series — Predice horizonte futuro de una serie.
-   Triggers: "predecir", "forecast", "futuro", "SARIMAX", "Prophet".
-   Requiere: file_path, index_column, target_column, model ∈
-   {sarimax, prophet, forecaster_autoreg}, forecast_steps."""
+8. forecast_time_series — Predice horizonte futuro de una serie con SARIMAX.
+   Triggers: "predecir", "forecast", "futuro", "SARIMAX".
+   Requiere: file_path, index_column, target_column, forecast_steps."""
 
 # Reglas comunes (no ablacionables) del bloque TOOLS.
 _TOOLS_REGLAS_COMUNES = """\
@@ -162,10 +162,10 @@ _EXPLAIN_RESULT_HEADER = """\
 EXPLICACIÓN DE RESULTADOS:
 Si el último mensaje 'tool' proviene de una herramienta analítica y vas a
 responder en TEXTO (no otra tool call), estructura SIEMPRE la respuesta en estos
-tres bloques, en este orden y con estas etiquetas exactas en negrita:
+tres bloques, en este orden y con estas etiquetas exactas en negrita, además de separarlo en bloques con saltos de lineas.
 
 **RESULTADO:** los datos exactos del mensaje 'tool'. Copia los valores numéricos
-y las etiquetas EXACTAMENTE como aparecen; no inventes ni redondees.
+y las etiquetas EXACTAMENTE como aparecen; no inventes ni redondees. NO QUIERO QUE DEVUELVAS EL JSON COMPLETO quiero que lo adaptes a PROSA NATURAL, pero con los datos clave intactos. 
 **INTERPRETACIÓN:** qué significan esos datos para el usuario, en lenguaje claro
 y sin jerga innecesaria.
 **SIGUIENTE PASO:** una sugerencia accionable y concreta."""

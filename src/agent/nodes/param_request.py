@@ -30,7 +30,7 @@ TOOL_REQUIRED_PARAMS: dict[str, list[str]] = {
         "file_path", "index_column", "new_column_name", "relation",
     ],
     "forecast_time_series": [
-        "file_path", "index_column", "target_column", "model", "forecast_steps",
+        "file_path", "index_column", "target_column", "forecast_steps",
     ],
 }
 
@@ -69,7 +69,6 @@ _PARAM_DESCRIPTIONS: dict[str, str] = {
     ),
     # Forecast
     "target_column": "el nombre de la columna a predecir",
-    "model": "el modelo predictivo: 'sarimax', 'prophet' o 'forecaster_autoreg'",
     "forecast_steps": "el número de pasos futuros a predecir (entero positivo)",
 }
 

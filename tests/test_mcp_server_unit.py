@@ -364,12 +364,12 @@ async def test_forecast_with_metrics(respx_mock, sample_csv):
 @respx.mock(base_url="http://testserver")
 @pytest.mark.asyncio
 async def test_forecast_no_metrics(respx_mock, sample_csv):
-    respx_mock.post("/Datos/Prophet").mock(
+    respx_mock.post("/Datos/Sarimax").mock(
         return_value=httpx.Response(200, content=b"ts,p\n2024-01-21,1.0\n")
     )
     out = await forecast_time_series(
         file_path=str(sample_csv), index_column="ts", target_column="valor",
-        model="prophet", forecast_steps=5, return_metrics=False,
+        model="sarimax", forecast_steps=5, return_metrics=False, with_plot=False,
     )
     assert "output_path" in out
     assert out["metrics"] is None

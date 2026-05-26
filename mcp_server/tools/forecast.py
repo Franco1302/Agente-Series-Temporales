@@ -1,4 +1,4 @@
-"""Tool MCP: predicción de series temporales (SARIMAX, Prophet, ForecasterAutoreg)."""
+"""Tool MCP: predicción de series temporales (SARIMAX)."""
 
 from __future__ import annotations
 
@@ -15,19 +15,8 @@ from mcp_server.instance import mcp
 from mcp_server.observability.http_hooks import init_mcp_http_log, attach_observability
 _SETTINGS = load_settings()
 
-_MODEL_TO_DATOS: dict[str, str] = {
-    # Endpoints MCP que generan el CSV de prediccion segun el modelo.
-    "sarimax": "/Datos/Sarimax",
-    "prophet": "/Datos/Prophet",
-    "forecaster_autoreg": "/Datos/ForecasterAutoreg",
-}
-
-_MODEL_TO_ERROR: dict[str, str] = {
-    # Endpoints MCP que devuelven metricas de error del modelo.
-    "sarimax": "/Error/Sarimax",
-    "prophet": "/Error/Prophet",
-    "forecaster_autoreg": "/Error/ForecasterAutoreg",
-}
+_DATOS_ENDPOINT = "/Datos/Sarimax"
+_ERROR_ENDPOINT = "/Error/Sarimax"
 
 
 class ForecastTimeSeriesInput(BaseModel):
@@ -35,36 +24,21 @@ class ForecastTimeSeriesInput(BaseModel):
     file_path: str
     index_column: str
     target_column: str
-    model: Literal["sarimax", "prophet", "forecaster_autoreg"]
+    model: Literal["sarimax"] = "sarimax"
     forecast_steps: int
     frequency: Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"] = "D"
-    regressor: Optional[str] = None
     return_metrics: bool = True
     with_plot: bool = True
 
 
 def _datos_params(inp: ForecastTimeSeriesInput) -> dict:
-    """Construye los parametros para el endpoint /Datos segun el modelo.
-
-    - Siempre envia indice, frecuencia y tamaño del horizonte.
-    - Para forecaster_autoreg incluye el nombre del regresor.
-    """
-    base: dict = {"indice": inp.index_column, "freq": inp.frequency, "size": inp.forecast_steps}
-    if inp.model == "forecaster_autoreg":
-        base["regresor"] = inp.regressor or "RandomForestRegressor"
-    return base
+    """Parametros para /Datos/Sarimax: indice, frecuencia y horizonte."""
+    return {"indice": inp.index_column, "freq": inp.frequency, "size": inp.forecast_steps}
 
 
 def _error_params(inp: ForecastTimeSeriesInput) -> dict:
-    """Construye los parametros para el endpoint /Error segun el modelo.
-
-    - No incluye el horizonte, solo metadatos del indice.
-    - Para forecaster_autoreg incluye el nombre del regresor.
-    """
-    base: dict = {"indice": inp.index_column, "freq": inp.frequency}
-    if inp.model == "forecaster_autoreg":
-        base["regresor"] = inp.regressor or "RandomForestRegressor"
-    return base
+    """Parametros para /Error/Sarimax: solo indice y frecuencia."""
+    return {"indice": inp.index_column, "freq": inp.frequency}
 
 
 @mcp.tool()
@@ -72,25 +46,15 @@ async def forecast_time_series(
     file_path: Annotated[str, Field(description="Ruta local al CSV con la serie histórica.")],
     index_column: Annotated[str, Field(description="Columna índice del CSV.")],
     target_column: Annotated[str, Field(description="Columna a predecir.")],
-    model: Annotated[
-        Literal["sarimax", "prophet", "forecaster_autoreg"],
-        Field(
-            description=(
-                "'sarimax' = estadístico clásico (bueno con estacionalidad); "
-                "'prophet' = modelo Facebook (robusto a huecos y festivos); "
-                "'forecaster_autoreg' = skforecast con regresor autorregresivo."
-            ),
-        ),
-    ],
     forecast_steps: Annotated[int, Field(gt=0, description="Número de pasos a predecir.")],
     frequency: Annotated[
         Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"],
         Field(description="Frecuencia temporal de la serie (debe coincidir con el CSV)."),
     ] = "D",
-    regressor: Annotated[
-        Optional[str],
-        Field(description="Solo forecaster_autoreg: nombre del regresor (default RandomForestRegressor)."),
-    ] = None,
+    model: Annotated[
+        Literal["sarimax"],
+        Field(description="Modelo de predicción. Actualmente solo 'sarimax' está operativo."),
+    ] = "sarimax",
     return_metrics: Annotated[bool, Field(description="Si True, también devuelve métricas de error.")] = True,
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG con la predicción.")] = True,
 ) -> dict:
@@ -114,17 +78,17 @@ async def forecast_time_series(
             file_path=file_path, index_column=index_column,
             target_column=target_column, model=model,
             forecast_steps=forecast_steps, frequency=frequency,
-            regressor=regressor, return_metrics=return_metrics, with_plot=with_plot,
+            return_metrics=return_metrics, with_plot=with_plot,
         )
-        datos_endpoint = _MODEL_TO_DATOS[inp.model]
-        error_endpoint = _MODEL_TO_ERROR[inp.model]
+        datos_endpoint = _DATOS_ENDPOINT
+        error_endpoint = _ERROR_ENDPOINT
         datos_params = _datos_params(inp)
         filename, content, mime = open_csv_for_upload(inp.file_path)
 
         out_name = deterministic_filename(
             f"forecast_{inp.model}",
             Path(inp.file_path).stem, inp.index_column, inp.target_column,
-            str(inp.forecast_steps), inp.frequency, str(inp.regressor),
+            str(inp.forecast_steps), inp.frequency,
             ext="csv",
         )
 

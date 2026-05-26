@@ -67,10 +67,9 @@ HERRAMIENTAS:
    Requiere: file_path, index_column, new_column_name, relation ∈
    {pca, correlation, covariance, linear, polynomial}.
 
-8. forecast_time_series — Predice horizonte futuro de una serie.
-   Triggers: "predecir", "forecast", "futuro", "SARIMAX", "Prophet".
-   Requiere: file_path, index_column, target_column, model ∈
-   {sarimax, prophet, forecaster_autoreg}, forecast_steps.
+8. forecast_time_series — Predice horizonte futuro de una serie con SARIMAX.
+   Triggers: "predecir", "forecast", "futuro", "SARIMAX".
+   Requiere: file_path, index_column, target_column, forecast_steps.
 
 9. consultar_teoria — SIEMPRE para preguntas teóricas (qué es drift, ARMA, p-valor,
    diferencias entre tests, fundamentos de series temporales). No respondas de
