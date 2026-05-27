@@ -34,6 +34,12 @@ class AgentState(TypedDict):
     # {nombre_param: valor_o_None}; None cuando no hay herramienta pendiente
     pending_params: Optional[dict]
 
+    # Nombre de la herramienta cuyos parámetros opcionales (tunables) ya se
+    # confirmaron con el usuario. Evita el bucle "preguntar → respuesta del
+    # usuario → preguntar de nuevo" cuando se ejecuta el siguiente ciclo del
+    # razonador.
+    optionals_confirmed_for: Optional[str]
+
     # Fragmentos de documentación recuperados por el nodo recuperar_contexto
     rag_context: Optional[str]
 

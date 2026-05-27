@@ -7,9 +7,16 @@ import re
 import time
 import uuid
 
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from src.agent.nodes.param_request import TOOL_REQUIRED_PARAMS
+from src.agent.nodes.param_request import (
+    get_missing_alternative_groups,
+    get_missing_params,
+    get_missing_tunable_params,
+    get_tunable_params,
+    is_cancel_intent,
+    parse_optional_values,
+)
 from src.agent.prompts import ANALYTICAL_TOOL_NAMES, build_system_prompt
 from src.agent.state import AgentState
 from src.agent.tools import AGENT_TOOLS
@@ -241,6 +248,125 @@ def _verify_and_repair(response: AIMessage, messages: list) -> AIMessage:
         return response
 
 
+def _merge_with_pending_params(response: AIMessage, state: AgentState) -> AIMessage:
+    """Fusiona los args ya recogidos en `pending_params` con la nueva tool call.
+
+    Cuando el turno anterior pidió parámetros obligatorios al usuario, los
+    modelos locales cuantizados a menudo re-emiten la tool call con SOLO el
+    parámetro que el usuario acaba de aportar y olvidan los args originales
+    (file_path, method, etc.). Esto provoca un bucle pregunta → respuesta →
+    pregunta porque el razonador vuelve a detectar obligatorios ausentes.
+
+    La fusión conserva todos los valores no vacíos previamente recogidos y deja
+    que los args del LLM sobrescriban únicamente cuando aportan un valor real.
+    Si la tool call es para una tool distinta a la pendiente (el usuario cambió
+    de intención), no se fusiona nada.
+    """
+    tool_calls = getattr(response, "tool_calls", None) or []
+    if not tool_calls:
+        return response
+
+    pending_tool = state.get("pending_tool")
+    pending_params = state.get("pending_params") or {}
+    if not pending_tool or not pending_params:
+        return response
+
+    call = tool_calls[0]
+    tool_name = call.get("name", "") if isinstance(call, dict) else getattr(call, "name", "")
+    if tool_name != pending_tool:
+        return response
+
+    new_args = call.get("args", {}) if isinstance(call, dict) else getattr(call, "args", {})
+    merged = dict(pending_params)
+    for k, v in (new_args or {}).items():
+        if v not in (None, ""):
+            merged[k] = v
+
+    if merged == new_args:
+        return response
+
+    call_id = (
+        call.get("id") if isinstance(call, dict) else getattr(call, "id", None)
+    ) or f"call_{uuid.uuid4().hex[:12]}"
+    return AIMessage(
+        content=response.content,
+        tool_calls=[{
+            "name": tool_name,
+            "args": merged,
+            "id": call_id,
+            "type": "tool_call",
+        }],
+        additional_kwargs=getattr(response, "additional_kwargs", {}) or {},
+    )
+
+
+def _last_human_message_content(messages: list) -> str:
+    """Devuelve el contenido del último HumanMessage como string, o cadena vacía."""
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            content = msg.content
+            if isinstance(content, str):
+                return content
+            return str(content)
+    return ""
+
+
+def _replay_pending_tool_call(state: AgentState) -> dict:
+    """Construye la tool call de forma determinista tras la confirmación del usuario.
+
+    Se invoca cuando el razonador detecta que el turno actual responde a una
+    pregunta de confirmación de parámetros opcionales (`optionals_confirmed_for`
+    está fijado y coincide con `pending_tool`). En lugar de re-invocar al LLM
+    (que con modelos locales cuantizados suele "olvidar" los args originales
+    y vuelve a pedirlos), se reconstruye la tool call a partir de
+    `pending_params` + cualquier `nombre=valor` que el usuario haya indicado
+    explícitamente en su respuesta.
+
+    Si el usuario expresa cancelación ("no quiero", "olvídalo", etc.), se
+    aborta la operación y se limpia el estado pendiente.
+    """
+    pending_tool = state.get("pending_tool") or ""
+    base_args = dict(state.get("pending_params") or {})
+    user_msg = _last_human_message_content(state.get("messages", []))
+
+    tunables = get_tunable_params(pending_tool, base_args)
+    explicit = parse_optional_values(user_msg, tunables) if user_msg else {}
+
+    # Cancelación solo si el usuario expresa negativa Y no aporta valores
+    # explícitos (ej. "no quiero ejecutarla" cancela; "no quiero defaults,
+    # usa threshold=0.3" sigue y aplica los valores).
+    if user_msg and not explicit and is_cancel_intent(user_msg):
+        return {
+            "messages": [AIMessage(
+                content=(
+                    "De acuerdo, cancelo la ejecución de **{tool}**. "
+                    "¿Qué te gustaría hacer en su lugar?"
+                ).format(tool=pending_tool)
+            )],
+            "pending_tool": None,
+            "pending_params": None,
+            "optionals_confirmed_for": None,
+        }
+
+    final_args = {**base_args, **explicit}
+
+    synthetic_call = {
+        "name": pending_tool,
+        "args": final_args,
+        "id": f"call_{uuid.uuid4().hex[:12]}",
+        "type": "tool_call",
+    }
+    tool_call_msg = AIMessage(content="", tool_calls=[synthetic_call])
+
+    return {
+        "messages": [tool_call_msg],
+        "rag_context": None,
+        "pending_tool": None,
+        "pending_params": None,
+        "optionals_confirmed_for": None,
+    }
+
+
 def razonador_node(state: AgentState) -> dict:
     """Invoca el LLM con el estado actual y decide la próxima acción.
 
@@ -266,6 +392,14 @@ def razonador_node(state: AgentState) -> dict:
                 )
             ],
         }
+
+    # Atajo determinista: si veníamos esperando la confirmación de opcionales,
+    # reconstruimos la tool call sin pasar por el LLM. Esto evita que el modelo
+    # local re-emita la tool sin los args obligatorios (file_path, index_column,
+    # method, etc.) y termine pidiéndolos otra vez en bucle.
+    pending_tool_state = state.get("pending_tool")
+    if pending_tool_state and state.get("optionals_confirmed_for") == pending_tool_state:
+        return _replay_pending_tool_call(state)
 
     csv_path = state.get("csv_path")
     csv_metadata = state.get("csv_metadata")
@@ -299,6 +433,10 @@ def razonador_node(state: AgentState) -> dict:
     raw_response = llm.invoke(messages)
     duration_ms = (time.perf_counter() - t0) * 1000.0
     response = _coerce_text_toolcall(raw_response)
+    # Si el turno anterior pidió params obligatorios, recuperamos los args ya
+    # conocidos para que el LLM solo necesite aportar los nuevos. Sin esto, los
+    # modelos cuantizados pierden el contexto y reabren el bucle de preguntas.
+    response = _merge_with_pending_params(response, state)
 
     # Evento llm_call: tokens, tokens/s y si actuó el parser de fallback.
     # No-op cuando el subsistema de observabilidad está apagado.
@@ -335,14 +473,31 @@ def razonador_node(state: AgentState) -> dict:
         tool_name = call.get("name", "") if isinstance(call, dict) else getattr(call, "name", "")
         args = call.get("args", {}) if isinstance(call, dict) else getattr(call, "args", {})
 
-        required = TOOL_REQUIRED_PARAMS.get(tool_name, [])
-        missing = [p for p in required if p not in args or args[p] is None or args[p] == ""]
+        missing = get_missing_params(tool_name, args)
+        missing_groups = get_missing_alternative_groups(tool_name, args)
 
-        if missing:
+        if missing or missing_groups:
+            # Faltan obligatorios o un grupo "uno-de" (p. ej. periods|end_date
+            # en las tools sintéticas): pedirlos al usuario. La confirmación
+            # de opcionales se hará en el siguiente ciclo, una vez resueltos.
             updates["pending_tool"] = tool_name
             updates["pending_params"] = args
         else:
-            updates["pending_tool"] = None
-            updates["pending_params"] = None
+            # Obligatorios completos. Antes de ejecutar, confirmamos con el
+            # usuario los tunables (umbrales, bins, coeficientes…) que no haya
+            # fijado explícitamente. Solo preguntamos una vez por tool_name:
+            # `optionals_confirmed_for` se setea aquí y se limpia al proceder
+            # a la ejecución en el siguiente turno.
+            already_confirmed = state.get("optionals_confirmed_for") == tool_name
+            missing_tunable = get_missing_tunable_params(tool_name, args)
+
+            if missing_tunable and not already_confirmed:
+                updates["pending_tool"] = tool_name
+                updates["pending_params"] = args
+                updates["optionals_confirmed_for"] = tool_name
+            else:
+                updates["pending_tool"] = None
+                updates["pending_params"] = None
+                updates["optionals_confirmed_for"] = None
 
     return updates

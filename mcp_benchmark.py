@@ -53,9 +53,11 @@ from scripts._scoring_utils import evaluar_tool_call as _evaluar_tool_call
 OLLAMA_HOST = "http://localhost:11434"
 
 MODELS = [
+    "granite4.1:3b",
+    "qwen3.5:4b",
     "qwen2.5:3b-instruct-q4_K_M",
     "qwen2.5:7b-instruct-q4_K_M",
-    "llama3.1:8b-instruct-q4_K_M",
+    "llama3.1:8b-instruct-q4_K_M"
 ]
 
 
@@ -242,7 +244,7 @@ SYSTEM_PROMPT = (
     "de drift. Cuando el usuario te pida realizar una operación, invoca la "
     "herramienta más apropiada. REGLA CRÍTICA: pasa SOLO los parámetros que "
     "el usuario haya escrito explícitamente en su mensaje y OMITE el resto. "
-    "Mejor una tool call con arguments={} que con parámetros inventados."
+    "NO INVENTES PARAMETROS ¡, ES MEJOR NO PASAR ARGUMENTOS QUE INVENTARLOS! Si el usuario no dio detalles, "
 )
 
 
