@@ -69,46 +69,144 @@ TOOL_ALTERNATIVE_GROUPS: dict[str, list[list[str]]] = {
     "generate_synthetic_trend": [["periods", "end_date"]],
 }
 
-_PARAM_DESCRIPTIONS: dict[str, str] = {
-    # Comunes
-    "file_path": "la ruta al fichero CSV",
-    "index_column": "el nombre de la columna que actúa como índice temporal del CSV",
-    "start_date": "la fecha de inicio en formato YYYY-MM-DD (ej. 2024-01-01)",
-    "frequency": "la frecuencia temporal: 'D' (diaria), 'W' (semanal), 'M' (mensual), 'h' (horaria), 'min' o 's'",
-    # Distribución
-    "distribution_type": (
-        "el código de distribución (1=Normal, 2=Binomial, 3=Poisson, 4=Geométrica, "
-        "7=Uniforme, 9=Exponencial, 10=Gamma, 11=Beta, 17=Aleatorio, etc.)"
-    ),
-    "distribution_params": "los parámetros de la distribución como lista (ej. [0.0, 1.0] para Normal mu=0 sigma=1)",
-    # Periódica
-    "period_length": "cada cuántas observaciones se repite el patrón (entero positivo)",
-    "pattern_type": "tipo de patrón cíclico: 1=variación de amplitud, 2=variación de cantidad de elementos",
-    # Tendencia
-    "trend_type": "el código del tipo de tendencia (lineal, polinómica, exponencial, etc.)",
-    "trend_params": "los coeficientes que definen la tendencia como lista de números",
-    # Drift
-    "method": (
-        "el método de detección de drift: KS (Kolmogorov-Smirnov), JS (Jensen-Shannon), "
-        "PSI (Population Stability Index), CUSUM, MEWMA o HOTELLING"
-    ),
-    # Augmentación
-    "strategy": (
-        "la estrategia de aumentación: 'normal', 'muller', 'duplicate', 'harmonic' o 'statistical'"
-    ),
-    "size": "el número de observaciones nuevas a generar (entero positivo)",
-    # Exógenas
-    "new_column_name": "el nombre de la nueva columna que se creará",
-    "relation": (
-        "el tipo de relación: 'pca', 'correlation', 'covariance', 'linear' o 'polynomial'"
-    ),
-    # Forecast
-    "target_column": "el nombre de la columna a predecir",
-    "forecast_steps": "el número de pasos futuros a predecir (entero positivo)",
-    # Horizonte temporal (XOR en las tools sintéticas)
-    "periods": "el número de observaciones a generar (entero positivo)",
-    "end_date": "la fecha de fin en formato YYYY-MM-DD",
+
+# ── Lectura del schema de la tool (descripciones, defaults, enums) ──────────
+#
+# Antes había un dict `_PARAM_DESCRIPTIONS` (y otro `_OPTIONAL_PARAM_INFO` con
+# defaults) que repetía a mano lo que cada tool MCP ya declara en su
+# `Field(description=…, default=…)`. Esa duplicación había generado bugs por
+# desincronización. Ahora se lee directamente del schema de cada tool.
+
+@lru_cache(maxsize=1)
+def _tools_by_name() -> dict[str, object]:
+    return {t.name: t for t in AGENT_TOOLS}
+
+
+def _get_tool(tool_name: str):
+    return _tools_by_name().get(tool_name)
+
+
+def _iter_properties(tool) -> dict[str, dict]:
+    """Normaliza el schema de la tool a `{param: {description, default, enum, type}}`.
+
+    Soporta los dos formatos que conviven en AGENT_TOOLS:
+      * tools MCP: `args_schema` es un dict JSON Schema crudo.
+      * tools LangChain locales (consultar_teoria): `args_schema` es un
+        Pydantic BaseModel con `model_fields`.
+    """
+    if tool is None:
+        return {}
+    schema = getattr(tool, "args_schema", None)
+    if schema is None:
+        return {}
+    if isinstance(schema, dict):
+        return dict(schema.get("properties", {}))
+    if hasattr(schema, "model_fields"):
+        from pydantic.fields import PydanticUndefined
+        out: dict[str, dict] = {}
+        for name, field in schema.model_fields.items():
+            entry: dict = {}
+            if getattr(field, "description", None):
+                entry["description"] = field.description
+            default = getattr(field, "default", PydanticUndefined)
+            if default is not PydanticUndefined:
+                entry["default"] = default
+            out[name] = entry
+        return out
+    return {}
+
+
+# Defaults que NO viven en el `Field(default=…)` del schema. Dos categorías:
+#
+#   1) Default condicional al valor de otro parámetro (no expresable en JSON
+#      Schema). Ej.: `threshold` en `detect_drift` cambia según `method`
+#      (ver `mcp_server/tools/drift.py:_DEFAULT_THRESHOLDS`).
+#
+#   2) Default funcional que vive en el cuerpo de la función MCP en vez de en
+#      la firma — los parámetros se declaran `Optional[T] = None` y la
+#      función sustituye por el valor real cuando llega `None`. El refactor
+#      limpio sería declararlos `Field(default=X)` en `mcp_server/tools/`,
+#      pero eso simplifica también el cuerpo de la función. Hasta que se
+#      haga, esta tabla mantiene la verdad cara al usuario.
+_DEFAULT_OVERRIDES: dict[tuple[str, str], str] = {
+    # Caso (1): condicional
+    ("detect_drift", "threshold"): "específico del método (KS=0.05, JS=0.2, PSI=0.25, CUSUM=1.5)",
+    # Caso (2): default en cuerpo de mcp_server/tools/drift.py:_build_query_params
+    ("detect_drift", "num_bins"): "10",
+    ("detect_drift", "drift_cusum"): "0.5",
+    ("detect_drift", "min_instances"): "100",
+    ("detect_drift", "lambd"): "0.5",
+    ("detect_drift", "alpha"): "0.05",
+    # Caso (2): default en cuerpo de mcp_server/tools/augment.py
+    ("augment_time_series", "duplication_factor"): "0.5",
+    ("augment_time_series", "perturbation_std"): "0.1",
+    ("augment_time_series", "statistical_type"): "1",
+    # Caso (2): la API calcula los coeficientes automáticamente cuando faltan
+    # (solo aplica a relation in {pca, correlation, covariance}; las relaciones
+    # lineal/polinómica los exigen y la propia API rechaza con error claro).
+    ("create_exogenous_variable", "coefficients"): "se calcularán automáticamente a partir de los datos",
 }
+
+
+def _format_default_value(value: object) -> str:
+    """Convierte el default a un texto legible para el usuario."""
+    if value is None:
+        return "sin valor por defecto"
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, str):
+        return f"'{value}'"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        return str(value) if value else "[]"
+    return str(value)
+
+
+def get_param_description(tool_name: str, param: str) -> str:
+    """Descripción de un parámetro leída del schema de la tool MCP/LC.
+
+    Devuelve un fallback genérico si la tool no expone descripción para ese
+    parámetro (la solución preferida es enriquecer el `Field(description=…)`).
+    """
+    props = _iter_properties(_get_tool(tool_name))
+    desc = props.get(param, {}).get("description")
+    if isinstance(desc, str) and desc.strip():
+        return desc.strip()
+    return f"el valor de '{param}'"
+
+
+def get_param_default_text(tool_name: str, param: str) -> str:
+    """Texto legible del default de un parámetro.
+
+    Consulta primero `_DEFAULT_OVERRIDES` (defaults condicionales que no caben
+    en el schema). Si no, cae al `default` del schema. Como último recurso,
+    devuelve «sin valor por defecto».
+    """
+    override = _DEFAULT_OVERRIDES.get((tool_name, param))
+    if override is not None:
+        return override
+    props = _iter_properties(_get_tool(tool_name))
+    entry = props.get(param, {})
+    if "default" not in entry:
+        return "sin valor por defecto"
+    return _format_default_value(entry["default"])
+
+
+def get_param_enum(tool_name: str, param: str) -> list[str]:
+    """Valores permitidos por un parámetro Literal[...], o [] si no aplica."""
+    props = _iter_properties(_get_tool(tool_name))
+    enum = props.get(param, {}).get("enum")
+    if isinstance(enum, list):
+        return [str(v) for v in enum]
+    return []
+
+
+def get_tool_description(tool_name: str) -> str:
+    """Primer párrafo de la descripción de la tool (su docstring en MCP)."""
+    tool = _get_tool(tool_name)
+    desc = (getattr(tool, "description", "") or "").strip()
+    return desc.split("\n\n", 1)[0].strip()
 
 
 # ── Parámetros opcionales "tunables" ────────────────────────────────────────
@@ -147,36 +245,6 @@ _TOOL_TUNABLES_STATIC: dict[str, list[str]] = {
     ],
     "generate_synthetic_trend": ["noise"],
 }
-
-# Descripciones + default-as-text para cada tunable. Se usa para construir el
-# mensaje de confirmación que ve el usuario.
-_OPTIONAL_PARAM_INFO: dict[str, tuple[str, str]] = {
-    "threshold": (
-        "umbral de decisión del test",
-        "específico del método (KS=0.05, JS=0.2, PSI=0.25, CUSUM=1.5)",
-    ),
-    "num_bins": ("número de bins del histograma (PSI)", "10"),
-    "drift_cusum": ("término de deriva del CUSUM", "0.5"),
-    "min_instances": ("número de observaciones iniciales del límite de control", "100"),
-    "lambd": ("parámetro de suavizado del MEWMA", "0.5"),
-    "alpha": ("nivel de significación del límite de control", "0.05"),
-    "duplication_factor": ("proporción de filas duplicadas", "0.5"),
-    "perturbation_std": ("desviación estándar del ruido añadido al duplicar", "0.1"),
-    "statistical_type": ("tipo de estadístico para la estrategia 'statistical'", "1"),
-    "coefficients": (
-        "lista de coeficientes para la relación lineal/polinómica",
-        "se calcularán automáticamente a partir de los datos",
-    ),
-    "frequency": ("frecuencia temporal de la serie", "'D' (diaria)"),
-    "model": ("modelo de predicción", "'sarimax'"),
-    "constant": ("término constante c del modelo ARMA", "0.0"),
-    "noise_std": ("desviación estándar del ruido blanco", "1.0"),
-    "seasonality": ("periodo de estacionalidad", "0 (sin estacionalidad)"),
-    "ar_coefficients": ("coeficientes AR del modelo", "[] (sin componente AR)"),
-    "ma_coefficients": ("coeficientes MA del modelo", "[] (sin componente MA)"),
-    "noise": ("magnitud del ruido aditivo gaussiano sobre la tendencia", "0.0"),
-}
-
 
 def _is_empty(value: object) -> bool:
     """True si el valor cuenta como ausente (None, cadena vacía o lista vacía)."""
@@ -229,6 +297,7 @@ def get_missing_tunable_params(tool_name: str, provided_args: dict) -> list[str]
 
 
 def _format_required_message(
+    tool_name: str,
     missing: list[str],
     missing_groups: list[list[str]] | None = None,
 ) -> str:
@@ -236,10 +305,11 @@ def _format_required_message(
         "Para continuar necesito algunos datos adicionales. Por favor, proporciona:"
     ]
     for param in missing:
-        desc = _PARAM_DESCRIPTIONS.get(param, f"el valor de '{param}'")
-        lines.append(f"  • **{param}**: {desc}")
+        lines.append(f"  • **{param}**: {get_param_description(tool_name, param)}")
     for group in missing_groups or []:
-        alternativas = " **o** ".join(f"**{p}** ({_PARAM_DESCRIPTIONS.get(p, p)})" for p in group)
+        alternativas = " **o** ".join(
+            f"**{p}** ({get_param_description(tool_name, p)})" for p in group
+        )
         lines.append(f"  • Uno de: {alternativas}")
     return "\n".join(lines)
 
@@ -251,9 +321,8 @@ def _format_optional_confirmation_message(tool_name: str, missing_tunable: list[
         "",
     ]
     for param in missing_tunable:
-        desc, default = _OPTIONAL_PARAM_INFO.get(
-            param, (f"el parámetro '{param}'", "valor por defecto del sistema")
-        )
+        desc = get_param_description(tool_name, param)
+        default = get_param_default_text(tool_name, param)
         lines.append(f"  • **{param}** ({desc}) → default: `{default}`")
     lines.append("")
     lines.append(
@@ -365,7 +434,7 @@ def solicitar_parametros_node(state: AgentState) -> dict:
     missing_groups = get_missing_alternative_groups(pending_tool, collected)
     if missing_required or missing_groups:
         return {"messages": [AIMessage(
-            content=_format_required_message(missing_required, missing_groups),
+            content=_format_required_message(pending_tool, missing_required, missing_groups),
         )]}
 
     missing_tunable = get_missing_tunable_params(pending_tool, collected)

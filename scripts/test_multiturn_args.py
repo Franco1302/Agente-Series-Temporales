@@ -358,6 +358,51 @@ def _e2e_synthetic() -> bool:
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
+def _check_message_quality() -> bool:
+    """Verifica que los mensajes 'Para continuar necesito…' usan descripciones MCP.
+
+    Tras el refactor, las descripciones y defaults del usuario se leen del schema
+    de cada tool MCP (`Field(description=…, default=…)`) en vez de un dict
+    hand-coded. Esta verificación se asegura de que:
+
+      * El mensaje incluye el nombre de cada parámetro obligatorio.
+      * Cada parámetro tiene una descripción no trivial (len > 10).
+      * No aparece el fallback `el valor de '<param>'` en NINGÚN param (señal
+        de que la descripción de MCP no estaba presente y se perdió contexto).
+      * No hay artefactos tipo `PydanticUndefined` o `None` como texto literal.
+    """
+    from src.agent.nodes.param_request import (
+        TOOL_REQUIRED_PARAMS,
+        _format_required_message,
+        get_missing_alternative_groups,
+        get_param_description,
+    )
+
+    print("\n── PARTE 3: calidad de mensajes auto-generados ──")
+    fail = False
+    for tool, required in sorted(TOOL_REQUIRED_PARAMS.items()):
+        if not required:
+            continue
+        msg = _format_required_message(tool, list(required), get_missing_alternative_groups(tool, {}))
+        problemas: list[str] = []
+        for param in required:
+            if f"**{param}**" not in msg:
+                problemas.append(f"falta nombre '{param}'")
+            desc = get_param_description(tool, param)
+            if desc.startswith("el valor de '"):
+                problemas.append(f"sin descripción MCP para '{param}'")
+            elif len(desc) < 10:
+                problemas.append(f"descripción demasiado corta para '{param}': {desc!r}")
+        if "PydanticUndefined" in msg or "None" in msg.split():
+            problemas.append("artefacto Pydantic/None en mensaje")
+        marca = "OK " if not problemas else "FAIL"
+        resumen = " | ".join(problemas) if problemas else f"{len(required)} params, mensaje legible"
+        print(f"  [{marca}] {tool}: {resumen}")
+        if problemas:
+            fail = True
+    return not fail
+
+
 def main() -> int:
     print("═══ TESTS DEL FIX DE PÉRDIDA DE ARGS ENTRE TURNOS ═══")
 
@@ -372,16 +417,19 @@ def main() -> int:
 
     print(f"\n  Resumen parte 1: {len(_CASES) - len(fallos)}/{len(_CASES)} tools OK")
 
-    print("\n── PARTE 2: E2E con LLM real ──")
+    quality_ok = _check_message_quality()
+
+    print("\n── PARTE 4: E2E con LLM real ──")
     e2e_drift_ok = _e2e_drift()
     e2e_synth_ok = _e2e_synthetic()
 
     print("\n═══ RESUMEN GLOBAL ═══")
     print(f"  Mockeados      : {len(_CASES) - len(fallos)}/{len(_CASES)}")
+    print(f"  Calidad mensaje: {'OK' if quality_ok else 'FAIL'}")
     print(f"  E2E drift      : {'OK' if e2e_drift_ok else 'FAIL'}")
     print(f"  E2E synth      : {'OK' if e2e_synth_ok else 'FAIL'}")
 
-    return 0 if (not fallos and e2e_drift_ok and e2e_synth_ok) else 1
+    return 0 if (not fallos and quality_ok and e2e_drift_ok and e2e_synth_ok) else 1
 
 
 if __name__ == "__main__":

@@ -113,44 +113,114 @@ _BEHAVIOR_FALLBACK = """\
 - Si la petición del usuario es genuinamente ambigua y no encaja con ninguna
   herramienta, pide aclaración en texto plano sin emitir tool call."""
 
-# Descripciones de las tools 1..8 (siempre presentes).
-_TOOLS_1_TO_8 = """\
-1. generate_synthetic_distribution — Genera datos siguiendo una distribución estadística
-   (Normal, Poisson, Beta, Gamma, Uniforme...). Triggers: "datos sintéticos", "serie aleatoria",
-   "distribución X". Requiere: start_date, frequency, distribution_type (1-17),
-   distribution_params. Pasa periods O end_date, no ambos.
+# ── Descripciones de las tools 1..8 (generación dinámica) ──────────────────
+#
+# Antes este bloque era un literal hand-coded que duplicaba información del
+# schema MCP (descripción, parámetros requeridos, valores enum). Ahora se
+# genera leyendo `tool.description` y `tool.args_schema` de cada herramienta
+# cargada vía MCP. Solo se mantienen hand-coded las dos piezas que el schema
+# no expresa:
+#
+#   * `TOOL_TRIGGERS`: frases que disparan la elección de cada tool (guía
+#     al LLM, no derivable).
+#   * `TOOL_EXTRAS`: notas adicionales que ayudan al modelo a usar bien la
+#     tool (enumeraciones complementarias, opcionales destacados, etc.).
+#
+# El orden visual de las 8 tools queda fijado por `_TOOL_ORDER`. El orden
+# de `AGENT_TOOLS` depende del subproceso MCP y no es estable a través de
+# reloads, así que no podemos usarlo directamente.
 
-2. generate_synthetic_arma — Genera serie con autocorrelación temporal (AR/MA/ARMA).
-   Triggers: "ARMA", "AR(p)", "autocorrelación", "memoria temporal".
-   Requiere: start_date, frequency. Opcionales: ar_coefficients, ma_coefficients.
+_TOOL_ORDER: list[str] = [
+    "generate_synthetic_distribution",
+    "generate_synthetic_arma",
+    "generate_synthetic_periodic",
+    "generate_synthetic_trend",
+    "detect_drift",
+    "augment_time_series",
+    "create_exogenous_variable",
+    "forecast_time_series",
+]
 
-3. generate_synthetic_periodic — Genera serie con patrones cíclicos (estacionalidad).
-   Triggers: "estacional", "cíclica", "patrón repetido cada N".
-   Requiere: start_date, frequency, period_length, pattern_type, distribution_type,
-   distribution_params.
+TOOL_TRIGGERS: dict[str, str] = {
+    "generate_synthetic_distribution": '"datos sintéticos", "serie aleatoria", "distribución X"',
+    "generate_synthetic_arma": '"ARMA", "AR(p)", "autocorrelación", "memoria temporal"',
+    "generate_synthetic_periodic": '"estacional", "cíclica", "patrón repetido cada N"',
+    "generate_synthetic_trend": '"tendencia", "creciente", "decreciente lineal/polinómico/exponencial"',
+    "detect_drift": '"drift", "ha cambiado", "estabilidad de los datos"',
+    "augment_time_series": '"aumentar datos", "más observaciones", "ampliar dataset"',
+    "create_exogenous_variable": '"variable exógena", "nueva columna", "PCA", "correlación"',
+    "forecast_time_series": '"predecir", "forecast", "futuro", "SARIMAX"',
+}
 
-4. generate_synthetic_trend — Genera serie con tendencia determinista.
-   Triggers: "tendencia", "creciente", "decreciente lineal/polinómico/exponencial".
-   Requiere: start_date, frequency, trend_type, trend_params.
+# Notas opcionales que NO viven en el schema (enumeraciones extra, etc.).
+TOOL_EXTRAS: dict[str, str] = {
+    "generate_synthetic_distribution": "Distribuciones: Normal, Poisson, Beta, Gamma, Uniforme, etc. (códigos 1-17).",
+    "generate_synthetic_arma": "Opcionales: ar_coefficients, ma_coefficients.",
+    "detect_drift": "Univariantes: KS, JS, PSI, CUSUM. Multivariantes: MEWMA, HOTELLING.",
+    "forecast_time_series": "Modelo: SARIMAX.",
+}
 
-5. detect_drift — Detecta cambio de distribución en un CSV.
-   Triggers: "drift", "ha cambiado", "estabilidad de los datos".
-   Requiere: file_path, index_column, method ∈ {KS, JS, PSI, CUSUM, MEWMA, HOTELLING}.
-   Univariantes: KS, JS, PSI, CUSUM. Multivariantes: MEWMA, HOTELLING.
+# Por tool, el parámetro requerido cuyo enum queremos mostrar inline en la
+# línea "Requiere:" para que el LLM sepa de antemano los valores válidos.
+_REQUIRED_PARAM_WITH_ENUM: dict[str, str] = {
+    "detect_drift": "method",
+    "augment_time_series": "strategy",
+    "create_exogenous_variable": "relation",
+}
 
-6. augment_time_series — Amplía un CSV con observaciones nuevas.
-   Triggers: "aumentar datos", "más observaciones", "ampliar dataset".
-   Requiere: file_path, index_column, strategy ∈ {normal, muller, duplicate,
-   harmonic, statistical}, size, frequency.
 
-7. create_exogenous_variable — Añade columna derivada al CSV.
-   Triggers: "variable exógena", "nueva columna", "PCA", "correlación".
-   Requiere: file_path, index_column, new_column_name, relation ∈
-   {pca, correlation, covariance, linear, polynomial}.
+def _build_tools_1_to_8() -> str:
+    """Genera la sección "1.…8." del bloque HERRAMIENTAS desde la metadata MCP.
 
-8. forecast_time_series — Predice horizonte futuro de una serie con SARIMAX.
-   Triggers: "predecir", "forecast", "futuro", "SARIMAX".
-   Requiere: file_path, index_column, target_column, forecast_steps."""
+    Para cada tool en `_TOOL_ORDER` lee del schema:
+      * `tool.description` (primer párrafo del docstring) como texto principal.
+      * lista de parámetros requeridos (auto-derivada del schema).
+      * `enum` del parámetro principal (method/strategy/relation) cuando aplica.
+      * grupos XOR de `TOOL_ALTERNATIVE_GROUPS` para la nota "Pasa X O Y".
+
+    Combina lo anterior con `TOOL_TRIGGERS` (hand-coded) y `TOOL_EXTRAS`
+    (hand-coded). El resultado es byte-distinto del literal anterior, por lo
+    que los snapshots de prompt deben regenerarse.
+    """
+    # Import dentro de la función para evitar ciclos al cargar el módulo.
+    from src.agent.nodes.param_request import (
+        TOOL_ALTERNATIVE_GROUPS,
+        TOOL_REQUIRED_PARAMS,
+        get_param_enum,
+        get_tool_description,
+    )
+
+    entries: list[str] = []
+    for idx, name in enumerate(_TOOL_ORDER, start=1):
+        desc = get_tool_description(name)
+        triggers = TOOL_TRIGGERS.get(name, "")
+
+        enum_param = _REQUIRED_PARAM_WITH_ENUM.get(name)
+        required: list[str] = []
+        for p in TOOL_REQUIRED_PARAMS.get(name, []):
+            if p == enum_param:
+                values = get_param_enum(name, p)
+                if values:
+                    required.append(f"{p} ∈ {{{', '.join(values)}}}")
+                    continue
+            required.append(p)
+        required_str = ", ".join(required)
+
+        xor_note = ""
+        for group in TOOL_ALTERNATIVE_GROUPS.get(name, []):
+            xor_note = f" Pasa {' O '.join(group)}, no ambos."
+
+        entry_lines = [
+            f"{idx}. {name} — {desc}",
+            f"   Triggers: {triggers}.",
+            f"   Requiere: {required_str}.{xor_note}",
+        ]
+        extras = TOOL_EXTRAS.get(name)
+        if extras:
+            entry_lines.append(f"   {extras}")
+        entries.append("\n".join(entry_lines))
+
+    return "\n\n".join(entries)
 
 # Reglas comunes (no ablacionables) del bloque TOOLS.
 _TOOLS_REGLAS_COMUNES = """\
@@ -270,7 +340,7 @@ def _build_tools_block(ablation: PromptAblation) -> str:
     parts: list[str] = [
         "HERRAMIENTAS:",
         "",
-        _TOOLS_1_TO_8,
+        _build_tools_1_to_8(),
         "",
         tool9,
         "",

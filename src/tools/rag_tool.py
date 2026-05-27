@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import os
 from contextvars import ContextVar
-from typing import Any
+from typing import Annotated, Any
 
 from langchain_core.documents import Document
 from langchain_core.tools import tool
+from pydantic import Field
 
 # Punto de entrada unico de recuperacion: densa / MMR / hibrida (BM25 + RRF).
 from src.rag_engine.hybrid import recuperar_documentos, resolve_search_type
@@ -88,7 +89,12 @@ def _build_context_fragments(documents: list[Document]) -> tuple[str, list[str]]
 
 
 @tool
-def consultar_teoria(query: str) -> str:
+def consultar_teoria(
+    query: Annotated[
+        str,
+        Field(description="Pregunta o tema teórico a consultar reformulado en lenguaje claro."),
+    ],
+) -> str:
     """Consulta la base teorica del TFG y devuelve fragmentos como contexto documental.
 
     Devuelve el contexto recuperado SIN redactar una respuesta: la sintesis la

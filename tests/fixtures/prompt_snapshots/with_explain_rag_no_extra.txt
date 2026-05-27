@@ -34,42 +34,41 @@ COMPORTAMIENTO:
 
 HERRAMIENTAS:
 
-1. generate_synthetic_distribution — Genera datos siguiendo una distribución estadística
-   (Normal, Poisson, Beta, Gamma, Uniforme...). Triggers: "datos sintéticos", "serie aleatoria",
-   "distribución X". Requiere: start_date, frequency, distribution_type (1-17),
-   distribution_params. Pasa periods O end_date, no ambos.
+1. generate_synthetic_distribution — Genera una serie temporal sintética siguiendo una distribución estadistica.
+   Triggers: "datos sintéticos", "serie aleatoria", "distribución X".
+   Requiere: start_date, frequency, distribution_type, distribution_params. Pasa periods O end_date, no ambos.
+   Distribuciones: Normal, Poisson, Beta, Gamma, Uniforme, etc. (códigos 1-17).
 
-2. generate_synthetic_arma — Genera serie con autocorrelación temporal (AR/MA/ARMA).
+2. generate_synthetic_arma — Genera una serie temporal con estructura ARMA(p,q).
    Triggers: "ARMA", "AR(p)", "autocorrelación", "memoria temporal".
-   Requiere: start_date, frequency. Opcionales: ar_coefficients, ma_coefficients.
+   Requiere: start_date, frequency. Pasa periods O end_date, no ambos.
+   Opcionales: ar_coefficients, ma_coefficients.
 
-3. generate_synthetic_periodic — Genera serie con patrones cíclicos (estacionalidad).
+3. generate_synthetic_periodic — Genera una serie temporal con patrones ciclicos repetidos.
    Triggers: "estacional", "cíclica", "patrón repetido cada N".
-   Requiere: start_date, frequency, period_length, pattern_type, distribution_type,
-   distribution_params.
+   Requiere: start_date, frequency, distribution_type, distribution_params, period_length, pattern_type. Pasa periods O end_date, no ambos.
 
-4. generate_synthetic_trend — Genera serie con tendencia determinista.
+4. generate_synthetic_trend — Genera una serie temporal con tendencia determinista.
    Triggers: "tendencia", "creciente", "decreciente lineal/polinómico/exponencial".
-   Requiere: start_date, frequency, trend_type, trend_params.
+   Requiere: start_date, frequency, trend_type, trend_params. Pasa periods O end_date, no ambos.
 
-5. detect_drift — Detecta cambio de distribución en un CSV.
+5. detect_drift — Ejecuta un test estadístico de detección de drift sobre un CSV.
    Triggers: "drift", "ha cambiado", "estabilidad de los datos".
    Requiere: file_path, index_column, method ∈ {KS, JS, PSI, CUSUM, MEWMA, HOTELLING}.
    Univariantes: KS, JS, PSI, CUSUM. Multivariantes: MEWMA, HOTELLING.
 
-6. augment_time_series — Amplía un CSV con observaciones nuevas.
+6. augment_time_series — Genera observaciones adicionales para un CSV existente preservando estadisticos.
    Triggers: "aumentar datos", "más observaciones", "ampliar dataset".
-   Requiere: file_path, index_column, strategy ∈ {normal, muller, duplicate,
-   harmonic, statistical}, size, frequency.
+   Requiere: file_path, index_column, strategy ∈ {normal, muller, duplicate, harmonic, statistical}, size, frequency.
 
-7. create_exogenous_variable — Añade columna derivada al CSV.
+7. create_exogenous_variable — Añade una nueva columna sintetica al CSV calculada a partir de las existentes.
    Triggers: "variable exógena", "nueva columna", "PCA", "correlación".
-   Requiere: file_path, index_column, new_column_name, relation ∈
-   {pca, correlation, covariance, linear, polynomial}.
+   Requiere: file_path, index_column, new_column_name, relation ∈ {pca, correlation, covariance, linear, polynomial}.
 
-8. forecast_time_series — Predice horizonte futuro de una serie con SARIMAX.
+8. forecast_time_series — Entrena un modelo predictivo y devuelve un horizonte de prediccion.
    Triggers: "predecir", "forecast", "futuro", "SARIMAX".
    Requiere: file_path, index_column, target_column, forecast_steps.
+   Modelo: SARIMAX.
 
 9. consultar_teoria — SIEMPRE para preguntas teóricas (qué es drift, ARMA, p-valor,
    diferencias entre tests, fundamentos de series temporales). No respondas de
