@@ -6,6 +6,7 @@ import json
 import re
 import time
 import uuid
+from typing import Callable
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
@@ -248,6 +249,408 @@ def _verify_and_repair(response: AIMessage, messages: list) -> AIMessage:
         return response
 
 
+# ── Defensa contra invención de args sin evidencia en el mensaje del usuario ─
+#
+# Aunque `RULE_NO_INVENT` lo prohíbe en el system prompt, el modelo local
+# cuantizado tiende a rellenar campos "rellenables por sentido común" (fechas,
+# frecuencias, métodos, tipos numéricos, listas de parámetros, enteros,
+# nombres de columna) ante peticiones vagas. Cuando la tool call llega con un
+# valor inventado, `get_missing_params` no lo detecta como ausente y la tool
+# se ejecuta con datos que el usuario nunca eligió.
+#
+# Esta defensa post-LLM revisa la primera tool call y, para cada (tool, arg)
+# del `_FIELD_EVIDENCE_MAP`, aplica el checker del tipo correspondiente. Si la
+# evidencia no aparece en el historial de mensajes del usuario, el arg se
+# elimina y `get_missing_params` lo recogerá como ausente para que el grafo
+# lo pida explícitamente.
+#
+# Cobertura: todas las herramientas analíticas (sintéticas, drift, augment,
+# exogenous, forecast). `file_path` no se vigila aquí: la sección FICHERO
+# ACTIVO del prompt suministra la ruta de forma legítima desde el estado.
+
+
+# ── Patrones de evidencia textual ───────────────────────────────────────────
+
+_DATE_EVIDENCE_RE = re.compile(
+    r"\b(?:19|20)\d{2}\b"
+    r"|\b(?:fecha|inicio|desde|comienza|empieza|empezando|partir\s+de|hasta|fin)"
+    r"|\b(?:ener|febrer|marzo|abril|mayo|junio|julio|agost|septiembr|octubr|noviembr|diciembr)",
+    re.IGNORECASE,
+)
+
+_FREQUENCY_KEYWORDS: tuple[str, ...] = (
+    "diari", "semanal", "mensu", "trimestr", "anual", "año", "anos",
+    "horari", "hora", "minuto", "segundo",
+    "cada hora", "cada día", "cada dia", "cada semana", "cada mes", "cada año",
+    "freq", "frecuencia",
+)
+
+# Cualquier dígito o número español escrito en palabras (desde "dos") cuenta
+# como evidencia. "uno/una/un" se excluye a propósito: en español funciona
+# casi siempre como artículo indefinido ("una serie", "un análisis"), no como
+# numeral, y daría muchos falsos positivos sobre `periods`/`forecast_steps`.
+_INTEGER_EVIDENCE_RE = re.compile(
+    r"\b\d+\b"
+    r"|\b(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|"
+    r"trece|catorce|quince|diecis[eé]is|veinte|treinta|cuarenta|cincuenta|"
+    r"sesenta|setenta|ochenta|noventa|cien|mil)\b",
+    re.IGNORECASE,
+)
+
+# Listas numéricas: corchetes/paréntesis con dígitos, decimales sueltos, pares
+# separados por coma, patrones de asignación letra=número ("p = 30", "mu=0",
+# "lambda=5"), o palabras explícitas para referirse a parámetros.
+_NUMERIC_LIST_EVIDENCE_RE = re.compile(
+    r"[\[\(]\s*[-+]?\d"
+    r"|\b-?\d+[\.,]\d+\b"
+    r"|\b-?\d+\s*,\s*-?\d+\b"
+    r"|\b[a-záéíóú]{1,6}\s*=\s*-?\d"
+    r"|\b(?:par[aá]metros?|coeficientes?|valores?|param|lista|sigma|desv|"
+    r"mu|media|lambda|prob|probabilidad)\b",
+    re.IGNORECASE,
+)
+
+# Frases que el usuario emplea cuando delega la elección de un valor al sistema
+# ("usa los defaults", "cualquiera", "como tú quieras", "lo que sea"). Cuando
+# alguna aparece en el historial, la defensa anti-invención se desactiva por
+# completo para ese turno: el usuario ha aceptado explícitamente que el LLM
+# proponga un valor sensato, y bloquearlo provoca bucles infinitos de la forma
+# usuario→"usa defaults"→agente→"dame el valor"→usuario→"cualquiera"→…
+_DELEGATION_KEYWORDS: tuple[str, ...] = (
+    "default", "predetermin", "est[aá]ndar", "t[ií]pico", "habitual",
+    "lo que sea", "lo que t[uú] quieras", "lo que quieras",
+    "lo que prefieras", "como sea", "como t[uú] quieras", "como quieras",
+    "que t[uú] quieras", "que quieras",
+    "cualquier", "no importa", "no me importa", "me da igual",
+    "elige t[uú]", "elige tu", "decide t[uú]", "decide tu",
+    "tu eliges", "t[uú] eliges", "tu decides", "t[uú] decides",
+    "gen[eé]ralos t[uú]", "haz t[uú]", "genera t[uú]",
+)
+
+
+def _user_delegates(user_text: str) -> bool:
+    """True si el usuario delegó explícitamente la elección de algún valor.
+
+    No intentamos identificar a qué campo se refiere la delegación: si la
+    palabra aparece en el historial, asumimos que el usuario quiere que el
+    LLM proponga valores sensatos. Es preferible un ejecución con valores
+    razonables a un bucle de preguntas.
+    """
+    return _has_any_keyword(user_text, _DELEGATION_KEYWORDS)
+
+
+def _build_delegation_directive(
+    pending_tool: str | None,
+    missing: list[str],
+) -> SystemMessage:
+    """Directiva que se inyecta al LLM cuando el usuario delega.
+
+    El objetivo NO es construir la tool call por código, sino forzar al LLM a
+    invocar la herramienta razonando y proponiendo él mismo los valores. Con
+    qwen cuantizado, sin este empujón explícito el modelo tiende a pedir
+    aclaraciones en texto plano incluso después de "usa los defaults" — la
+    directiva le indica que está autorizado a decidir y que debe emitir el
+    JSON ya.
+    """
+    if pending_tool and missing:
+        body = (
+            f"El usuario acaba de delegar explícitamente la elección de los "
+            f"parámetros que faltan para {pending_tool}. DEBES invocar la "
+            f"herramienta AHORA emitiendo el JSON de la tool call. Para los "
+            f"parámetros faltantes ({', '.join(missing)}) propón TÚ valores "
+            f"razonables y justifica brevemente tu elección en una frase "
+            f"antes del JSON. NO preguntes nada al usuario: ya ha dicho que "
+            f"confía en tu criterio."
+        )
+    elif pending_tool:
+        body = (
+            f"El usuario ha delegado. DEBES invocar {pending_tool} AHORA con "
+            f"los parámetros ya recogidos; no preguntes más."
+        )
+    else:
+        body = (
+            "El usuario acaba de delegar explícitamente la elección de "
+            "parámetros. DEBES invocar AHORA la herramienta más adecuada a "
+            "su petición, emitiendo el JSON de tool call con valores "
+            "razonables que tú elijas. Justifica brevemente tu elección en "
+            "una frase antes del JSON. NO preguntes al usuario."
+        )
+    return SystemMessage(content=body)
+
+# Mapas de palabras-clave para los enums semánticos (el LLM hace traducción
+# legítima «normal» → 1, «kolmogorov-smirnov» → KS; queremos detectar que
+# el usuario dijo *alguna* palabra relacionada).
+_DISTRIBUTION_NAMES: tuple[str, ...] = (
+    "normal", "gaussian", "gauss", "poisson", "uniform", "uniforme", "beta",
+    "gamma", "exponen", "binomial", "chi", "student", "t-student",
+    "geomet", "lognor", "weibull", "tipo", "distribu",
+)
+_TREND_NAMES: tuple[str, ...] = (
+    "lineal", "linear", "polinom", "polynom", "exponen", "logarit",
+    "constante", "constant", "potencia", "power", "sinusoid", "seno",
+    "tendencia", "crecient", "decrecient",
+)
+_PATTERN_NAMES: tuple[str, ...] = (
+    "amplitud", "cantidad", "patr[oó]n", "patron", "variaci[oó]n",
+    "variacion", "ciclo", "estacional",
+)
+_DRIFT_METHOD_NAMES: tuple[str, ...] = (
+    "ks", "kolmogorov", "smirnov",
+    "js", "jensen", "shannon",
+    "psi",
+    "cusum", "suma acumul",
+    "mewma", "ewma",
+    "hotelling", "t2", "t²", "t cuadrado",
+    "m[eé]todo", "metodo", "test", "univar", "multivar",
+)
+_AUGMENT_STRATEGY_NAMES: tuple[str, ...] = (
+    "normal", "muller", "box-muller", "duplica", "duplicar",
+    "harmoni", "arm[oó]ni", "statistical", "estad[ií]sti",
+    "estrategia",
+)
+_EXOGENOUS_RELATION_NAMES: tuple[str, ...] = (
+    "pca", "principal", "correla", "covar", "lineal", "linear",
+    "polinom", "polynom", "relaci[oó]n",
+)
+
+
+def _has_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
+    """True si alguna keyword (regex parcial, case-insensitive) aparece en text."""
+    for kw in keywords:
+        if re.search(kw, text, re.IGNORECASE):
+            return True
+    return False
+
+
+# ── Checkers por tipo de campo ──────────────────────────────────────────────
+
+def _check_date(user_text: str, value: object, state: dict) -> bool:
+    return bool(_DATE_EVIDENCE_RE.search(user_text))
+
+
+def _check_freq(user_text: str, value: object, state: dict) -> bool:
+    text = user_text.lower()
+    return any(kw in text for kw in _FREQUENCY_KEYWORDS)
+
+
+def _check_integer(user_text: str, value: object, state: dict) -> bool:
+    return bool(_INTEGER_EVIDENCE_RE.search(user_text))
+
+
+def _check_numeric_list(user_text: str, value: object, state: dict) -> bool:
+    return bool(_NUMERIC_LIST_EVIDENCE_RE.search(user_text))
+
+
+def _check_distribution_kind(user_text: str, value: object, state: dict) -> bool:
+    return _has_any_keyword(user_text, _DISTRIBUTION_NAMES)
+
+
+def _check_trend_kind(user_text: str, value: object, state: dict) -> bool:
+    return _has_any_keyword(user_text, _TREND_NAMES)
+
+
+def _check_pattern_kind(user_text: str, value: object, state: dict) -> bool:
+    return _has_any_keyword(user_text, _PATTERN_NAMES)
+
+
+def _check_drift_method(user_text: str, value: object, state: dict) -> bool:
+    return _has_any_keyword(user_text, _DRIFT_METHOD_NAMES)
+
+
+def _check_augment_strategy(user_text: str, value: object, state: dict) -> bool:
+    return _has_any_keyword(user_text, _AUGMENT_STRATEGY_NAMES)
+
+
+def _check_exogenous_relation(user_text: str, value: object, state: dict) -> bool:
+    return _has_any_keyword(user_text, _EXOGENOUS_RELATION_NAMES)
+
+
+def _check_existing_column(user_text: str, value: object, state: dict) -> bool:
+    """Columna que debe existir en el CSV activo (index_column, target_column).
+
+    Acepta cuando el valor aparece literalmente en el texto del usuario O
+    cuando coincide (case-insensitive) con alguna columna del CSV cargado.
+    Si no hay CSV ni mención textual, se considera invención.
+    """
+    if not isinstance(value, str) or not value:
+        return True
+    if value.lower() in user_text.lower():
+        return True
+    csv_meta = (state.get("csv_metadata") or {}) if state else {}
+    columns = csv_meta.get("columns") or []
+    return any(str(c).lower() == value.lower() for c in columns)
+
+
+def _check_new_column(user_text: str, value: object, state: dict) -> bool:
+    """Columna NUEVA a crear (create_exogenous_variable.new_column_name).
+
+    El usuario debe haber escrito el nombre exacto. No vale fallback contra
+    csv_metadata porque la columna aún no existe.
+    """
+    if not isinstance(value, str) or not value:
+        return True
+    return value.lower() in user_text.lower()
+
+
+_CHECKS: dict[str, Callable[[str, object, dict], bool]] = {
+    "date": _check_date,
+    "freq": _check_freq,
+    "integer": _check_integer,
+    "numeric_list": _check_numeric_list,
+    "distribution_kind": _check_distribution_kind,
+    "trend_kind": _check_trend_kind,
+    "pattern_kind": _check_pattern_kind,
+    "drift_method": _check_drift_method,
+    "augment_strategy": _check_augment_strategy,
+    "exogenous_relation": _check_exogenous_relation,
+    "existing_column": _check_existing_column,
+    "new_column": _check_new_column,
+}
+
+
+# ── Mapa (tool, arg) → tipo de evidencia ────────────────────────────────────
+#
+# Cobre todos los args invent-prone de las 8 herramientas analíticas. Los args
+# que no aparecen no se vigilan (cualquier valor pasa). `file_path` queda fuera:
+# la sección FICHERO ACTIVO del prompt lo proporciona desde el estado.
+_FIELD_EVIDENCE_MAP: dict[str, dict[str, str]] = {
+    "generate_synthetic_distribution": {
+        "start_date": "date",
+        "end_date": "date",
+        "frequency": "freq",
+        "distribution_type": "distribution_kind",
+        "distribution_params": "numeric_list",
+        "periods": "integer",
+    },
+    "generate_synthetic_arma": {
+        "start_date": "date",
+        "end_date": "date",
+        "frequency": "freq",
+        "periods": "integer",
+    },
+    "generate_synthetic_periodic": {
+        "start_date": "date",
+        "end_date": "date",
+        "frequency": "freq",
+        "distribution_type": "distribution_kind",
+        "distribution_params": "numeric_list",
+        "period_length": "integer",
+        "pattern_type": "pattern_kind",
+        "periods": "integer",
+    },
+    "generate_synthetic_trend": {
+        "start_date": "date",
+        "end_date": "date",
+        "frequency": "freq",
+        "trend_type": "trend_kind",
+        "trend_params": "numeric_list",
+        "periods": "integer",
+    },
+    "detect_drift": {
+        "method": "drift_method",
+        "index_column": "existing_column",
+    },
+    "augment_time_series": {
+        "strategy": "augment_strategy",
+        "size": "integer",
+        "frequency": "freq",
+        "index_column": "existing_column",
+    },
+    "create_exogenous_variable": {
+        "relation": "exogenous_relation",
+        "new_column_name": "new_column",
+        "index_column": "existing_column",
+    },
+    "forecast_time_series": {
+        "target_column": "existing_column",
+        "forecast_steps": "integer",
+        "index_column": "existing_column",
+    },
+}
+
+
+def _aggregate_human_text(messages: list) -> str:
+    """Concatena el contenido de todos los HumanMessage del historial."""
+    parts: list[str] = []
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            content = msg.content
+            parts.append(content if isinstance(content, str) else str(content))
+    return " ".join(parts)
+
+
+def _strip_invented_args(response: AIMessage, state: dict) -> AIMessage:
+    """Elimina de la tool call los args inventados sin evidencia en el texto del usuario.
+
+    Se ejecuta antes de `_merge_with_pending_params`, por lo que solo ve los
+    args que el LLM acaba de emitir (no los recogidos en turnos previos). Si
+    en pending_params hay un valor legítimo para el campo, se restaurará en
+    el siguiente paso del pipeline; los inventados quedan fuera y caen al
+    nodo de solicitud de parámetros.
+
+    Recibe `state` (no solo `messages`) porque algunos checkers consultan
+    `csv_metadata` para validar nombres de columna contra el CSV cargado.
+    """
+    tool_calls = getattr(response, "tool_calls", None) or []
+    if not tool_calls:
+        return response
+
+    call = tool_calls[0]
+    tool_name = call.get("name", "") if isinstance(call, dict) else getattr(call, "name", "")
+    type_map = _FIELD_EVIDENCE_MAP.get(tool_name)
+    if not type_map:
+        return response
+
+    args = dict(call.get("args", {}) if isinstance(call, dict) else getattr(call, "args", {}) or {})
+    messages = state.get("messages", []) if state else []
+    user_text = _aggregate_human_text(messages)
+    if not user_text:
+        return response
+
+    # Bypass por delegación: si el usuario acaba de delegar ("usa los defaults",
+    # "cualquiera", "como tú quieras"…), la defensa se desactiva ese turno y
+    # dejamos que el LLM proponga un valor sensato. Mirar SOLO el último mensaje
+    # del usuario evita que una delegación de un turno anterior arrastre permisos
+    # a turnos posteriores no relacionados.
+    last_human = ""
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            last_human = msg.content if isinstance(msg.content, str) else str(msg.content)
+            break
+    if last_human and _user_delegates(last_human):
+        return response
+
+    stripped: list[str] = []
+    for arg_name, field_type in type_map.items():
+        if arg_name not in args:
+            continue
+        if args[arg_name] in (None, "", []):
+            continue
+        checker = _CHECKS.get(field_type)
+        if checker is None:
+            continue
+        if not checker(user_text, args[arg_name], state or {}):
+            del args[arg_name]
+            stripped.append(arg_name)
+
+    if not stripped:
+        return response
+
+    call_id = (
+        call.get("id") if isinstance(call, dict) else getattr(call, "id", None)
+    ) or f"call_{uuid.uuid4().hex[:12]}"
+    return AIMessage(
+        content=response.content,
+        tool_calls=[{
+            "name": tool_name,
+            "args": args,
+            "id": call_id,
+            "type": "tool_call",
+        }],
+        additional_kwargs=getattr(response, "additional_kwargs", {}) or {},
+    )
+
+
 def _merge_with_pending_params(response: AIMessage, state: AgentState) -> AIMessage:
     """Fusiona los args ya recogidos en `pending_params` con la nueva tool call.
 
@@ -421,6 +824,25 @@ def razonador_node(state: AgentState) -> dict:
     if not messages or not isinstance(messages[0], SystemMessage):
         messages = [SystemMessage(content=system_prompt)] + messages
 
+    # Directiva de delegación: si el último HumanMessage delega ("usa los
+    # defaults", "cualquiera", "como tú quieras"…), añadimos una SystemMessage
+    # al final del historial que fuerza al LLM a invocar la tool con valores
+    # razonables propuestos por él. Sin este empujón el modelo cuantizado
+    # responde en texto plano y entra en bucle de preguntas. El LLM sigue
+    # razonando: nosotros solo le indicamos que está autorizado a decidir.
+    last_human_text = _last_human_message_content(messages)
+    if last_human_text and _user_delegates(last_human_text):
+        pending_params = state.get("pending_params") or {}
+        missing = (
+            get_missing_params(pending_tool_state, pending_params)
+            if pending_tool_state else []
+        )
+        # Inyectar SIEMPRE que haya delegación: si pending_tool_state es None
+        # la directiva indica al LLM que identifique él la herramienta; si hay
+        # pending_tool con missing, le dice qué params completar; si no falta
+        # nada, le dice que invoque ya con lo que hay.
+        messages = messages + [_build_delegation_directive(pending_tool_state, missing)]
+
     # Selección de tools: si el último ToolMessage es de consultar_teoria,
     # excluimos esa tool del bind para impedir bucles RAG → RAG → RAG.
     if last_tool == "consultar_teoria":
@@ -433,6 +855,12 @@ def razonador_node(state: AgentState) -> dict:
     raw_response = llm.invoke(messages)
     duration_ms = (time.perf_counter() - t0) * 1000.0
     response = _coerce_text_toolcall(raw_response)
+    # Anti-invención (RULE_NO_INVENT defensiva): retira args sin respaldo en el
+    # historial del usuario (fechas, frecuencias, métodos, listas numéricas,
+    # nombres de columna, etc.). Debe ir ANTES del merge: si pending_params
+    # tenía un valor legítimo recogido en un turno anterior, el merge posterior
+    # lo repondrá; los inventados de novo caen y forzarán a solicitar_parametros.
+    response = _strip_invented_args(response, state)
     # Si el turno anterior pidió params obligatorios, recuperamos los args ya
     # conocidos para que el LLM solo necesite aportar los nuevos. Sin esto, los
     # modelos cuantizados pierden el contexto y reabren el bucle de preguntas.

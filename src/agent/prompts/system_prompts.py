@@ -33,14 +33,12 @@ IDIOMA: Razona y responde siempre en español, independientemente del idioma del
 #: Regla CRÍTICA anti-invención de parámetros. Vive dentro de ``_BEHAVIOR_BLOCK``
 #: cuando ``PromptAblation.include_no_invent`` es ``True``.
 RULE_NO_INVENT = """\
-- REGLA CRÍTICA — nunca, bajo ningún concepto, inventes ni asumas valores por
-  defecto para parámetros que el usuario no haya proporcionado. Si dudas de un valor,
-  OMITE el parámetro entero del JSON de argumentos. Mejor una tool call con
-  arguments={} que una tool call con valores inventados.
-  Ejemplo: si el usuario solo dice "genera una serie temporal sintética" sin más
-  detalles, debes invocar generate_synthetic_series con arguments={} (sin start_date,
-  sin periods, sin frequency, sin distribution_type, sin distribution_params).
-  El nodo solicitar_parametros pedirá al usuario los datos que falten."""
+- REGLA — no inventes valores por defecto que el usuario no haya escrito.
+  Si dudas, OMITE el parámetro del JSON: arguments={} es preferible a valores
+  inventados. EXCEPCIÓN: si el usuario delega explícitamente ("usa los
+  defaults", "cualquiera", "lo que sea", "como tú quieras", "no me importa"),
+  propón TÚ valores razonables, justifica brevemente tu elección y completa
+  la tool call — eso es delegación, no invención."""
 
 #: Viñeta del bloque BEHAVIOR que obliga a usar ``consultar_teoria`` para teoría.
 RULE_THEORY_TOOL_BEHAVIOR = """\
@@ -230,15 +228,16 @@ _TOOLS_REGLAS_COMUNES = """\
 # Cabecera del bloque "EXPLICACIÓN DE RESULTADOS" (sin los ejemplos few-shot).
 _EXPLAIN_RESULT_HEADER = """\
 EXPLICACIÓN DE RESULTADOS:
-Si el último mensaje 'tool' proviene de una herramienta analítica y vas a
-responder en TEXTO (no otra tool call), estructura SIEMPRE la respuesta en estos
-tres bloques, en este orden y con estas etiquetas exactas en negrita, además de separarlo en bloques con saltos de lineas.
+Si el último mensaje 'tool' es de una herramienta analítica y respondes en
+TEXTO, estructura la respuesta en tres bloques con estas etiquetas en negrita:
 
-**RESULTADO:** los datos exactos del mensaje 'tool'. Copia los valores numéricos
-y las etiquetas EXACTAMENTE como aparecen; no inventes ni redondees. NO QUIERO QUE DEVUELVAS EL JSON COMPLETO quiero que lo adaptes a PROSA NATURAL, pero con los datos clave intactos. 
-**INTERPRETACIÓN:** qué significan esos datos para el usuario, en lenguaje claro
-y sin jerga innecesaria.
-**SIGUIENTE PASO:** una sugerencia accionable y concreta."""
+**RESULTADO:** los datos exactos del mensaje 'tool' en prosa (no JSON crudo).
+Copia los valores numéricos sin inventar ni redondear.
+**INTERPRETACIÓN:** qué significan esos valores para el caso concreto del
+usuario. Razona conectando los números con su petición; no es un resumen.
+**SIGUIENTE PASO:** sugerencia accionable y concreta.
+
+Varía el lenguaje y la longitud en cada respuesta; evita reusar frases."""
 
 
 _FILE_CONTEXT_TEMPLATE = """\

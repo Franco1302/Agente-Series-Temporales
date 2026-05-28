@@ -143,14 +143,28 @@ def _run_forgetful_case(case: ForgetfulCase) -> tuple[bool, str]:
 
     Returns (ok, detalle).
     """
+    # El segundo HumanMessage simula lo que el usuario teclea en el turno 2.
+    # Debe incluir evidencia textual de cada tipo de campo que el LLM emite
+    # (fecha, frecuencia, métodos, tipos de distribución/tendencia, listas
+    # numéricas, enteros, columnas) porque la defensa anti-invención de
+    # `_strip_invented_args` exige respaldo textual para cada uno. Sin esto,
+    # los args legítimos del turno 2 se interpretan como inventados.
+    user_reply = (
+        "aquí van los datos: fecha 2024-01-01, frecuencia diaria, "
+        "distribución normal lineal con parámetros [0.0, 1.0], "
+        "tipo de patrón amplitud, método KS kolmogorov, "
+        "estrategia normal, relación PCA lineal, "
+        "columna índice 'Indice', columna nueva 'y', columna objetivo 'valor', "
+        "30 pasos, doce observaciones."
+    )
     state_in: dict[str, Any] = {
         "messages": [
             HumanMessage(content=f"prepara {case.tool}"),
             AIMessage(content="Necesito más datos."),
-            HumanMessage(content="aquí van"),
+            HumanMessage(content=user_reply),
         ],
         "csv_path": case.already_collected.get("file_path"),
-        "csv_metadata": None,
+        "csv_metadata": {"columns": ["Indice", "valor"]},
         "pending_tool": case.tool,
         "pending_params": dict(case.already_collected),
         "optionals_confirmed_for": None,
