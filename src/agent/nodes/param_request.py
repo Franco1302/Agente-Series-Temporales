@@ -52,22 +52,10 @@ def _build_required_map() -> dict[str, list[str]]:
 TOOL_REQUIRED_PARAMS: dict[str, list[str]] = _build_required_map()
 
 
-# ── Grupos "alternativos" (XOR) que el schema no expresa ────────────────────
-#
-# Algunas tools requieren "exactamente uno de" varios parámetros — restricción
-# que vive como código imperativo dentro de la API (p. ej. `_resolve_horizon`
-# de `mcp_server/tools/synthetic.py`). El schema Pydantic los marca como
-# Optional, así que la verificación automática los pasaría por alto y la
-# API rechazaría la llamada con un error opaco para el usuario.
-#
-# Cada entrada es `tool_name → [grupo1, grupo2, …]` y cada grupo es una lista
-# de nombres de parámetros entre los cuales al menos uno debe estar presente.
-TOOL_ALTERNATIVE_GROUPS: dict[str, list[list[str]]] = {
-    "generate_synthetic_distribution": [["periods", "end_date"]],
-    "generate_synthetic_arma": [["periods", "end_date"]],
-    "generate_synthetic_periodic": [["periods", "end_date"]],
-    "generate_synthetic_trend": [["periods", "end_date"]],
-}
+# Los grupos "alternativos" (XOR) viven en este módulo como
+# ``TOOL_ALTERNATIVE_GROUPS``, derivados del schema vía
+# ``_build_alternative_groups_map`` (ver más abajo, justo después de
+# ``_iter_properties``).
 
 
 # ── Lectura del schema de la tool (descripciones, defaults, enums) ──────────
@@ -111,9 +99,50 @@ def _iter_properties(tool) -> dict[str, dict]:
             default = getattr(field, "default", PydanticUndefined)
             if default is not PydanticUndefined:
                 entry["default"] = default
+            # Propaga claves del json_schema_extra (oneof_group, etc.) para que
+            # los consumidores del agente lo lean del mismo `_iter_properties`
+            # tanto si la tool es MCP (dict crudo) como Pydantic (BaseModel).
+            extra = getattr(field, "json_schema_extra", None)
+            if isinstance(extra, dict):
+                for k, v in extra.items():
+                    entry.setdefault(k, v)
             out[name] = entry
         return out
     return {}
+
+
+# ── Grupos "alternativos" (XOR) derivados del schema ────────────────────────
+#
+# Fuente de verdad: cada parámetro miembro de un grupo "uno-de" se declara con
+# ``Field(json_schema_extra={"oneof_group": "<nombre>"})`` en su tool MCP. El
+# nombre del grupo agrupa los miembros entre sí dentro del mismo tool; un tool
+# puede declarar varios grupos (ej. "horizon", "scale", …). El agente lee este
+# metadato del JSON Schema vía ``_iter_properties`` y construye el mapa
+# automáticamente: añadir un grupo XOR nuevo en cualquier tool MCP no
+# requiere tocar este módulo.
+
+
+@lru_cache(maxsize=1)
+def _build_alternative_groups_map() -> dict[str, list[list[str]]]:
+    """Construye ``tool_name -> [[param, …], …]`` leyendo ``oneof_group`` del schema."""
+    result: dict[str, list[list[str]]] = {}
+    for tool in AGENT_TOOLS:
+        groups: dict[str, list[str]] = {}
+        for name, info in _iter_properties(tool).items():
+            grp = info.get("oneof_group") if isinstance(info, dict) else None
+            if isinstance(grp, str) and grp:
+                groups.setdefault(grp, []).append(name)
+        # Orden alfabético dentro de cada grupo: la salida es estable y no
+        # depende del orden de definición de los Field en la tool MCP.
+        non_trivial = [sorted(members) for members in groups.values() if len(members) >= 2]
+        if non_trivial:
+            result[tool.name] = sorted(non_trivial)
+    return result
+
+
+# Compatibilidad: la constante sigue exponiéndose para tests/scripts externos,
+# pero su contenido viene del schema MCP (no se mantiene a mano).
+TOOL_ALTERNATIVE_GROUPS: dict[str, list[list[str]]] = _build_alternative_groups_map()
 
 
 # Defaults que NO viven en el `Field(default=…)` del schema. Dos categorías:

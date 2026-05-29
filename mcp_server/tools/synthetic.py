@@ -170,8 +170,20 @@ async def generate_synthetic_distribution(
         ),
     ],
     distribution_params: Annotated[list[float], Field(description="Parámetros de la distribución como lista.")],
-    end_date: Annotated[Optional[str], Field(description="Fecha de fin 'YYYY-MM-DD'. Excluyente con periods.")] = None,
-    periods: Annotated[Optional[int], Field(description="Número de periodos. Excluyente con end_date.")] = None,
+    end_date: Annotated[
+        Optional[str],
+        Field(
+            description="Fecha de fin 'YYYY-MM-DD'. Excluyente con periods.",
+            json_schema_extra={"oneof_group": "horizon"},
+        ),
+    ] = None,
+    periods: Annotated[
+        Optional[int],
+        Field(
+            description="Número de periodos. Excluyente con end_date.",
+            json_schema_extra={"oneof_group": "horizon"},
+        ),
+    ] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna generada.")] = "valor",
     with_plot: Annotated[bool, Field(description="Si True, genera además un PNG con la gráfica.")] = True,
 ) -> dict:
@@ -246,8 +258,20 @@ async def generate_synthetic_distribution(
 async def generate_synthetic_arma(
     start_date: Annotated[str, Field(description="Fecha de inicio 'YYYY-MM-DD'.")],
     frequency: Annotated[_FREQ, Field(description="Frecuencia temporal.")],
-    end_date: Annotated[Optional[str], Field(description="Fecha de fin (excluyente con periods).")] = None,
-    periods: Annotated[Optional[int], Field(description="Número de periodos (excluyente con end_date).")] = None,
+    end_date: Annotated[
+        Optional[str],
+        Field(
+            description="Fecha de fin (excluyente con periods).",
+            json_schema_extra={"oneof_group": "horizon"},
+        ),
+    ] = None,
+    periods: Annotated[
+        Optional[int],
+        Field(
+            description="Número de periodos (excluyente con end_date).",
+            json_schema_extra={"oneof_group": "horizon"},
+        ),
+    ] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna generada.")] = "valor",
     constant: Annotated[float, Field(description="Término constante c del modelo ARMA.")] = 0.0,
     noise_std: Annotated[float, Field(description="Desviación estándar del ruido blanco.")] = 1.0,
@@ -340,8 +364,20 @@ async def generate_synthetic_periodic(
     distribution_params: Annotated[list[float], Field(description="Parámetros de la distribución base.")],
     period_length: Annotated[int, Field(gt=0, description="Cada cuántas observaciones se repite el patrón.")],
     pattern_type: Annotated[Literal[1, 2], Field(description="1 = variación de amplitud, 2 = variación de cantidad.")],
-    end_date: Annotated[Optional[str], Field(description="Fecha de fin (excluyente con periods).")] = None,
-    periods: Annotated[Optional[int], Field(description="Número de periodos (excluyente con end_date).")] = None,
+    end_date: Annotated[
+        Optional[str],
+        Field(
+            description="Fecha de fin (excluyente con periods).",
+            json_schema_extra={"oneof_group": "horizon"},
+        ),
+    ] = None,
+    periods: Annotated[
+        Optional[int],
+        Field(
+            description="Número de periodos (excluyente con end_date).",
+            json_schema_extra={"oneof_group": "horizon"},
+        ),
+    ] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna.")] = "valor",
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
 ) -> dict:
@@ -419,8 +455,20 @@ async def generate_synthetic_trend(
     frequency: Annotated[_FREQ, Field(description="Frecuencia temporal.")],
     trend_type: Annotated[int, Field(ge=1, description="Código del tipo de tendencia (lineal, polinómica, exponencial...).")],
     trend_params: Annotated[list[float], Field(description="Coeficientes que definen la tendencia.")],
-    end_date: Annotated[Optional[str], Field(description="Fecha de fin (excluyente con periods).")] = None,
-    periods: Annotated[Optional[int], Field(description="Número de periodos (excluyente con end_date).")] = None,
+    end_date: Annotated[
+        Optional[str],
+        Field(
+            description="Fecha de fin (excluyente con periods).",
+            json_schema_extra={"oneof_group": "horizon"},
+        ),
+    ] = None,
+    periods: Annotated[
+        Optional[int],
+        Field(
+            description="Número de periodos (excluyente con end_date).",
+            json_schema_extra={"oneof_group": "horizon"},
+        ),
+    ] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna.")] = "valor",
     noise: Annotated[float, Field(description="Magnitud del ruido aditivo gaussiano.")] = 0.0,
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
