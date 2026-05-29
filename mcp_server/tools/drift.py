@@ -30,17 +30,23 @@ _DEFAULT_THRESHOLDS: dict[str, float] = {"KS": 0.05, "JS": 0.2, "PSI": 0.25, "CU
 
 # Schema interno usado por _build_query_params y los tests unitarios. NO se expone al LLM
 # (la tool MCP recibe params planos para que el JSON Schema sea plano).
+#
+# Los defaults de los parámetros condicionales viven aquí (y en la firma de la
+# tool, que es lo que ve el LLM), NO en el cuerpo de _build_query_params: así el
+# agente los deriva del schema sin duplicar una tabla a mano. `threshold` es la
+# excepción: su default depende del método (ver `_DEFAULT_THRESHOLDS`), algo que
+# un único `Field(default=…)` no puede expresar, así que se resuelve aquí.
 class DetectDriftInput(BaseModel):
     file_path: str
     index_column: str
     method: Literal["KS", "JS", "PSI", "CUSUM", "MEWMA", "HOTELLING"]
     inicio: int = 1
     threshold: Optional[float] = None
-    num_bins: Optional[int] = None
-    drift_cusum: Optional[float] = None
-    min_instances: Optional[int] = None
-    lambd: Optional[float] = None
-    alpha: Optional[float] = None
+    num_bins: int = 10
+    drift_cusum: float = 0.5
+    min_instances: int = 100
+    lambd: float = 0.5
+    alpha: float = 0.05
 
 
 def _build_query_params(inp: DetectDriftInput) -> dict:
@@ -54,17 +60,17 @@ def _build_query_params(inp: DetectDriftInput) -> dict:
         params["threshold_js"] = threshold
     elif inp.method == "PSI":
         params["threshold_psi"] = threshold
-        params["num_bins"] = inp.num_bins if inp.num_bins is not None else 10
+        params["num_bins"] = inp.num_bins
     elif inp.method == "CUSUM":
         params["threshold_cusum"] = threshold
-        params["drift_cusum"] = inp.drift_cusum if inp.drift_cusum is not None else 0.5
+        params["drift_cusum"] = inp.drift_cusum
     elif inp.method in {"MEWMA", "HOTELLING"}:
-        params["min_instances"] = inp.min_instances if inp.min_instances is not None else 100
+        params["min_instances"] = inp.min_instances
         # alpha es el nivel de significación del límite de control: 0 es
         # degenerado (puede producir un w*S singular en la API). Default 0.05.
-        params["alpha"] = inp.alpha if inp.alpha is not None else 0.05
+        params["alpha"] = inp.alpha
         if inp.method == "MEWMA":
-            params["lambd"] = inp.lambd if inp.lambd is not None else 0.5
+            params["lambd"] = inp.lambd
     return params
 
 
@@ -123,7 +129,13 @@ def _build_summary(method: str, label: str, report: dict) -> str:
 @mcp.tool()
 async def detect_drift(
     file_path: Annotated[str, Field(description="Ruta local al CSV en data/temp_uploads/.")],
-    index_column: Annotated[str, Field(description="Nombre de la columna índice del CSV.")],
+    index_column: Annotated[
+        str,
+        Field(
+            description="Nombre de la columna índice del CSV.",
+            json_schema_extra={"evidence": "existing_column"},
+        ),
+    ],
     method: Annotated[
         Literal["KS", "JS", "PSI", "CUSUM", "MEWMA", "HOTELLING"],
         Field(
@@ -131,15 +143,55 @@ async def detect_drift(
                 "Método estadístico. KS y JS y PSI son univariantes; CUSUM es secuencial "
                 "univariante; MEWMA y HOTELLING son multivariantes."
             ),
+            json_schema_extra={"evidence": "drift_method"},
         ),
     ],
     inicio: Annotated[int, Field(description="Índice desde el que empezar el análisis.")] = 1,
-    threshold: Annotated[Optional[float], Field(description="Umbral de decisión (por defecto del método).")] = None,
-    num_bins: Annotated[Optional[int], Field(description="Solo PSI: número de bins (default 10).")] = None,
-    drift_cusum: Annotated[Optional[float], Field(description="Solo CUSUM: término de deriva (default 0.5).")] = None,
-    min_instances: Annotated[Optional[int], Field(description="MEWMA, HOTELLING: observaciones iniciales (default 100).")] = None,
-    lambd: Annotated[Optional[float], Field(description="MEWMA: parámetro de suavizado (default 0.5).")] = None,
-    alpha: Annotated[Optional[float], Field(description="MEWMA, HOTELLING: nivel de significación (default 0.05).")] = None,
+    threshold: Annotated[
+        Optional[float],
+        Field(
+            description="Umbral de decisión (por defecto del método).",
+            json_schema_extra={
+                "default_by": {"on": "method", "map": _DEFAULT_THRESHOLDS},
+                "tunable_if": {"method": ["KS", "JS", "PSI", "CUSUM"]},
+            },
+        ),
+    ] = None,
+    num_bins: Annotated[
+        int,
+        Field(
+            description="Solo PSI: número de bins (default 10).",
+            json_schema_extra={"tunable_if": {"method": ["PSI"]}},
+        ),
+    ] = 10,
+    drift_cusum: Annotated[
+        float,
+        Field(
+            description="Solo CUSUM: término de deriva (default 0.5).",
+            json_schema_extra={"tunable_if": {"method": ["CUSUM"]}},
+        ),
+    ] = 0.5,
+    min_instances: Annotated[
+        int,
+        Field(
+            description="MEWMA, HOTELLING: observaciones iniciales (default 100).",
+            json_schema_extra={"tunable_if": {"method": ["MEWMA", "HOTELLING"]}},
+        ),
+    ] = 100,
+    lambd: Annotated[
+        float,
+        Field(
+            description="MEWMA: parámetro de suavizado (default 0.5).",
+            json_schema_extra={"tunable_if": {"method": ["MEWMA"]}},
+        ),
+    ] = 0.5,
+    alpha: Annotated[
+        float,
+        Field(
+            description="MEWMA, HOTELLING: nivel de significación (default 0.05).",
+            json_schema_extra={"tunable_if": {"method": ["MEWMA", "HOTELLING"]}},
+        ),
+    ] = 0.05,
 ) -> dict:
     """Ejecuta un test estadístico de detección de drift sobre un CSV.
 

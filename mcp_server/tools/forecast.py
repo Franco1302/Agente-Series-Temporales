@@ -93,16 +93,41 @@ def _error_params(inp: ForecastTimeSeriesInput) -> dict:
 @mcp.tool()
 async def forecast_time_series(
     file_path: Annotated[str, Field(description="Ruta local al CSV con la serie histórica.")],
-    index_column: Annotated[str, Field(description="Columna índice del CSV.")],
-    target_column: Annotated[str, Field(description="Columna a predecir.")],
-    forecast_steps: Annotated[int, Field(gt=0, description="Número de pasos a predecir.")],
+    index_column: Annotated[
+        str,
+        Field(
+            description="Columna índice del CSV.",
+            json_schema_extra={"evidence": "existing_column"},
+        ),
+    ],
+    target_column: Annotated[
+        str,
+        Field(
+            description="Columna a predecir.",
+            json_schema_extra={"evidence": "existing_column"},
+        ),
+    ],
+    forecast_steps: Annotated[
+        int,
+        Field(
+            gt=0,
+            description="Número de pasos a predecir.",
+            json_schema_extra={"evidence": "integer"},
+        ),
+    ],
     frequency: Annotated[
         Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"],
-        Field(description="Frecuencia temporal de la serie (debe coincidir con el CSV)."),
+        Field(
+            description="Frecuencia temporal de la serie (debe coincidir con el CSV).",
+            json_schema_extra={"tunable": True},
+        ),
     ] = "D",
     model: Annotated[
         Literal["sarimax"],
-        Field(description="Modelo de predicción. Actualmente solo 'sarimax' está operativo."),
+        Field(
+            description="Modelo de predicción. Actualmente solo 'sarimax' está operativo.",
+            json_schema_extra={"tunable": True},
+        ),
     ] = "sarimax",
     return_metrics: Annotated[bool, Field(description="Si True, también devuelve métricas de error.")] = True,
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG con la predicción.")] = True,

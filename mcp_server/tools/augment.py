@@ -32,9 +32,9 @@ class AugmentTimeSeriesInput(BaseModel):
     strategy: Literal["normal", "muller", "duplicate", "harmonic", "statistical"]
     size: int
     frequency: Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"]
-    duplication_factor: Optional[float] = None
-    perturbation_std: Optional[float] = None
-    statistical_type: Optional[int] = None
+    duplication_factor: float = 0.5
+    perturbation_std: float = 0.1
+    statistical_type: int = 1
     with_plot: bool = True
 
 
@@ -44,6 +44,9 @@ def _build_query_params(inp: AugmentTimeSeriesInput) -> dict:
     - Siempre incluye el indice y la frecuencia para alinear el eje temporal.
     - Algunas estrategias reciben `size` directamente (normal, muller, harmonic).
     - Otras usan nombres distintos (duplicate: factores de ruido; statistical: tipo).
+
+    Los defaults de los parámetros condicionales viven en el schema (modelo y
+    firma de la tool), no aquí: el agente los deriva sin duplicar una tabla.
     """
     base = {"indice": inp.index_column, "freq": inp.frequency}
     if inp.strategy in {"normal", "muller", "harmonic"}:
@@ -51,22 +54,24 @@ def _build_query_params(inp: AugmentTimeSeriesInput) -> dict:
     if inp.strategy == "duplicate":
         return {
             **base,
-            "duplication_factor": inp.duplication_factor if inp.duplication_factor is not None else 0.5,
-            "perturbation_std": inp.perturbation_std if inp.perturbation_std is not None else 0.1,
+            "duplication_factor": inp.duplication_factor,
+            "perturbation_std": inp.perturbation_std,
         }
     if inp.strategy == "statistical":
-        return {
-            **base,
-            "tipo": inp.statistical_type if inp.statistical_type is not None else 1,
-            "num": inp.size,
-        }
+        return {**base, "tipo": inp.statistical_type, "num": inp.size}
     raise ValueError(f"Estrategia desconocida: {inp.strategy}")
 
 
 @mcp.tool()
 async def augment_time_series(
     file_path: Annotated[str, Field(description="Ruta local al CSV a aumentar.")],
-    index_column: Annotated[str, Field(description="Nombre de la columna índice del CSV.")],
+    index_column: Annotated[
+        str,
+        Field(
+            description="Nombre de la columna índice del CSV.",
+            json_schema_extra={"evidence": "existing_column"},
+        ),
+    ],
     strategy: Annotated[
         Literal["normal", "muller", "duplicate", "harmonic", "statistical"],
         Field(
@@ -76,25 +81,45 @@ async def augment_time_series(
                 "'harmonic' = añade ruido armónico; 'statistical' = muestreo "
                 "basado en estadísticos descriptivos."
             ),
+            json_schema_extra={"evidence": "augment_strategy"},
         ),
     ],
-    size: Annotated[int, Field(gt=0, description="Número de observaciones nuevas a generar.")],
+    size: Annotated[
+        int,
+        Field(
+            gt=0,
+            description="Número de observaciones nuevas a generar.",
+            json_schema_extra={"evidence": "integer"},
+        ),
+    ],
     frequency: Annotated[
         Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"],
-        Field(description="Frecuencia temporal de los datos generados."),
+        Field(
+            description="Frecuencia temporal de los datos generados.",
+            json_schema_extra={"evidence": "freq"},
+        ),
     ],
     duplication_factor: Annotated[
-        Optional[float],
-        Field(description="Solo strategy='duplicate': proporción duplicada (default 0.5)."),
-    ] = None,
+        float,
+        Field(
+            description="Solo strategy='duplicate': proporción duplicada (default 0.5).",
+            json_schema_extra={"tunable_if": {"strategy": ["duplicate"]}},
+        ),
+    ] = 0.5,
     perturbation_std: Annotated[
-        Optional[float],
-        Field(description="Solo strategy='duplicate': desviación del ruido (default 0.1)."),
-    ] = None,
+        float,
+        Field(
+            description="Solo strategy='duplicate': desviación del ruido (default 0.1).",
+            json_schema_extra={"tunable_if": {"strategy": ["duplicate"]}},
+        ),
+    ] = 0.1,
     statistical_type: Annotated[
-        Optional[int],
-        Field(description="Solo strategy='statistical': tipo de estadístico (default 1)."),
-    ] = None,
+        int,
+        Field(
+            description="Solo strategy='statistical': tipo de estadístico (default 1).",
+            json_schema_extra={"tunable_if": {"strategy": ["statistical"]}},
+        ),
+    ] = 1,
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
 ) -> dict:
     """Genera observaciones adicionales para un CSV existente preservando estadisticos.

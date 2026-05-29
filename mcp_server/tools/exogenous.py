@@ -63,8 +63,20 @@ def _build_query_params(inp: CreateExogenousVariableInput) -> dict:
 @mcp.tool()
 async def create_exogenous_variable(
     file_path: Annotated[str, Field(description="Ruta local al CSV multivariante.")],
-    index_column: Annotated[str, Field(description="Columna índice del CSV.")],
-    new_column_name: Annotated[str, Field(description="Nombre de la columna a añadir.")],
+    index_column: Annotated[
+        str,
+        Field(
+            description="Columna índice del CSV.",
+            json_schema_extra={"evidence": "existing_column"},
+        ),
+    ],
+    new_column_name: Annotated[
+        str,
+        Field(
+            description="Nombre de la columna a añadir.",
+            json_schema_extra={"evidence": "new_column"},
+        ),
+    ],
     relation: Annotated[
         Literal["pca", "correlation", "covariance", "linear", "polynomial"],
         Field(
@@ -74,11 +86,18 @@ async def create_exogenous_variable(
                 "'linear' = y=a·x+b (requiere coefficients=[slope, intercept]); "
                 "'polynomial' = combinación polinómica (requiere coefficients=[c0,c1,...])."
             ),
+            json_schema_extra={"evidence": "exogenous_relation"},
         ),
     ],
     coefficients: Annotated[
         Optional[list[float]],
-        Field(description="Solo linear/polynomial: lista de coeficientes."),
+        Field(
+            description="Solo linear/polynomial: lista de coeficientes.",
+            json_schema_extra={
+                "tunable_if": {"relation": ["linear", "polynomial"]},
+                "default_note": "se calcularán automáticamente a partir de los datos",
+            },
+        ),
     ] = None,
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
 ) -> dict:

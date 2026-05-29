@@ -11,6 +11,7 @@ from typing import Callable
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from src.agent.nodes.param_request import (
+    get_field_metadata,
     get_missing_alternative_groups,
     get_missing_params,
     get_missing_tunable_params,
@@ -21,6 +22,7 @@ from src.agent.nodes.param_request import (
 from src.agent.param_families import INHERITABLE_PARAMS
 from src.agent.prompts import ANALYTICAL_TOOL_NAMES, build_system_prompt
 from src.agent.state import AgentState
+from src.agent.tool_metadata import MUST_CITE_FIELDS
 from src.agent.tools import AGENT_TOOLS
 from src.config.llm_config import get_llm_with_tools, load_ollama_settings
 from src.observability import emit_llm_call
@@ -143,23 +145,6 @@ def _append_fuentes(response: AIMessage, messages: list) -> None:
         response.content = content.rstrip() + "\n\n" + fuentes
 
 
-# Campos deterministas (string/entero) que deben citarse literalmente en el
-# bloque RESULTADO de cada herramienta analítica. Se usan para verificar la
-# fidelidad numérica de la síntesis (RF-11). Los floats (p-valores, métricas)
-# se omiten a propósito: el modelo puede redondearlos legítimamente y un
-# substring-match daría falsos negativos.
-_MUST_CITE_FIELDS: dict[str, tuple[str, ...]] = {
-    "detect_drift": ("drift_label", "method_used"),
-    "forecast_time_series": ("model_used",),
-    "augment_time_series": ("new_rows", "strategy_used"),
-    "create_exogenous_variable": ("new_column_name", "relation_used"),
-    "generate_synthetic_distribution": ("rows_generated",),
-    "generate_synthetic_arma": ("rows_generated",),
-    "generate_synthetic_periodic": ("rows_generated",),
-    "generate_synthetic_trend": ("rows_generated",),
-}
-
-
 def _last_analytical_tool_message(messages: list) -> ToolMessage | None:
     """Devuelve el último ToolMessage de una herramienta analítica, o None.
 
@@ -189,7 +174,7 @@ def _extract_must_cite_facts(tool_msg: ToolMessage) -> list[str]:
         data = json.loads(raw) if isinstance(raw, str) else raw
         if not isinstance(data, dict):
             return []
-        fields = _MUST_CITE_FIELDS.get(getattr(tool_msg, "name", "") or "", ())
+        fields = MUST_CITE_FIELDS.get(getattr(tool_msg, "name", "") or "", ())
         facts: list[str] = []
         for key in fields:
             value = data.get(key)
@@ -522,65 +507,30 @@ _CHECKS: dict[str, Callable[[str, object, dict], bool]] = {
 }
 
 
-# ── Mapa (tool, arg) → tipo de evidencia ────────────────────────────────────
+# ── Mapa (tool, arg) → tipo de evidencia, derivado del schema ───────────────
 #
-# Cobre todos los args invent-prone de las 8 herramientas analíticas. Los args
-# que no aparecen no se vigilan (cualquier valor pasa). `file_path` queda fuera:
-# la sección FICHERO ACTIVO del prompt lo proporciona desde el estado.
-_FIELD_EVIDENCE_MAP: dict[str, dict[str, str]] = {
-    "generate_synthetic_distribution": {
-        "start_date": "date",
-        "end_date": "date",
-        "frequency": "freq",
-        "distribution_type": "distribution_kind",
-        "distribution_params": "numeric_list",
-        "periods": "integer",
-    },
-    "generate_synthetic_arma": {
-        "start_date": "date",
-        "end_date": "date",
-        "frequency": "freq",
-        "periods": "integer",
-    },
-    "generate_synthetic_periodic": {
-        "start_date": "date",
-        "end_date": "date",
-        "frequency": "freq",
-        "distribution_type": "distribution_kind",
-        "distribution_params": "numeric_list",
-        "period_length": "integer",
-        "pattern_type": "pattern_kind",
-        "periods": "integer",
-    },
-    "generate_synthetic_trend": {
-        "start_date": "date",
-        "end_date": "date",
-        "frequency": "freq",
-        "trend_type": "trend_kind",
-        "trend_params": "numeric_list",
-        "periods": "integer",
-    },
-    "detect_drift": {
-        "method": "drift_method",
-        "index_column": "existing_column",
-    },
-    "augment_time_series": {
-        "strategy": "augment_strategy",
-        "size": "integer",
-        "frequency": "freq",
-        "index_column": "existing_column",
-    },
-    "create_exogenous_variable": {
-        "relation": "exogenous_relation",
-        "new_column_name": "new_column",
-        "index_column": "existing_column",
-    },
-    "forecast_time_series": {
-        "target_column": "existing_column",
-        "forecast_steps": "integer",
-        "index_column": "existing_column",
-    },
-}
+# Antes era un literal hand-coded que repetía a mano lo que cada Field de la
+# tool MCP ya declara en `json_schema_extra={"evidence": "<tipo>"}`. Ahora se
+# deriva: para cada herramienta analítica se leen sus propiedades y se recoge la
+# clave `evidence` de las que la declaren. Añadir/cambiar un campo invent-prone
+# en `mcp_server/tools/` no requiere tocar este módulo.
+#
+# `file_path` queda fuera a propósito (no lleva `evidence`): la sección FICHERO
+# ACTIVO del prompt lo proporciona desde el estado.
+def _build_field_evidence_map() -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
+    for tool_name in ANALYTICAL_TOOL_NAMES:
+        evidence: dict[str, str] = {}
+        for param, info in get_field_metadata(tool_name).items():
+            ev = info.get("evidence") if isinstance(info, dict) else None
+            if isinstance(ev, str) and ev:
+                evidence[param] = ev
+        if evidence:
+            out[tool_name] = evidence
+    return out
+
+
+_FIELD_EVIDENCE_MAP: dict[str, dict[str, str]] = _build_field_evidence_map()
 
 
 def _aggregate_human_text(messages: list) -> str:

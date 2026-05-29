@@ -145,38 +145,6 @@ def _build_alternative_groups_map() -> dict[str, list[list[str]]]:
 TOOL_ALTERNATIVE_GROUPS: dict[str, list[list[str]]] = _build_alternative_groups_map()
 
 
-# Defaults que NO viven en el `Field(default=…)` del schema. Dos categorías:
-#
-#   1) Default condicional al valor de otro parámetro (no expresable en JSON
-#      Schema). Ej.: `threshold` en `detect_drift` cambia según `method`
-#      (ver `mcp_server/tools/drift.py:_DEFAULT_THRESHOLDS`).
-#
-#   2) Default funcional que vive en el cuerpo de la función MCP en vez de en
-#      la firma — los parámetros se declaran `Optional[T] = None` y la
-#      función sustituye por el valor real cuando llega `None`. El refactor
-#      limpio sería declararlos `Field(default=X)` en `mcp_server/tools/`,
-#      pero eso simplifica también el cuerpo de la función. Hasta que se
-#      haga, esta tabla mantiene la verdad cara al usuario.
-_DEFAULT_OVERRIDES: dict[tuple[str, str], str] = {
-    # Caso (1): condicional
-    ("detect_drift", "threshold"): "específico del método (KS=0.05, JS=0.2, PSI=0.25, CUSUM=1.5)",
-    # Caso (2): default en cuerpo de mcp_server/tools/drift.py:_build_query_params
-    ("detect_drift", "num_bins"): "10",
-    ("detect_drift", "drift_cusum"): "0.5",
-    ("detect_drift", "min_instances"): "100",
-    ("detect_drift", "lambd"): "0.5",
-    ("detect_drift", "alpha"): "0.05",
-    # Caso (2): default en cuerpo de mcp_server/tools/augment.py
-    ("augment_time_series", "duplication_factor"): "0.5",
-    ("augment_time_series", "perturbation_std"): "0.1",
-    ("augment_time_series", "statistical_type"): "1",
-    # Caso (2): la API calcula los coeficientes automáticamente cuando faltan
-    # (solo aplica a relation in {pca, correlation, covariance}; las relaciones
-    # lineal/polinómica los exigen y la propia API rechaza con error claro).
-    ("create_exogenous_variable", "coefficients"): "se calcularán automáticamente a partir de los datos",
-}
-
-
 def _format_default_value(value: object) -> str:
     """Convierte el default a un texto legible para el usuario."""
     if value is None:
@@ -205,18 +173,40 @@ def get_param_description(tool_name: str, param: str) -> str:
     return f"el valor de '{param}'"
 
 
-def get_param_default_text(tool_name: str, param: str) -> str:
-    """Texto legible del default de un parámetro.
+def get_param_default_text(tool_name: str, param: str, provided_args: dict | None = None) -> str:
+    """Texto legible del default de un parámetro, leído del schema de la tool.
 
-    Consulta primero `_DEFAULT_OVERRIDES` (defaults condicionales que no caben
-    en el schema). Si no, cae al `default` del schema. Como último recurso,
-    devuelve «sin valor por defecto».
+    Maneja tres formas de default, todas derivadas de `json_schema_extra`:
+
+      * ``default_by={"on": <disc>, "map": {...}}`` — default condicional al
+        valor de otro parámetro (p. ej. `threshold` según `method`). Si
+        ``provided_args`` permite resolver el discriminador, devuelve el valor
+        concreto; si no, lista el mapa.
+      * ``default_note=<texto>`` — el default no es un valor fijo sino una
+        explicación (p. ej. "se calcularán automáticamente…").
+      * ``default=<valor>`` — el `Field(default=…)` normal del schema.
+
+    Como último recurso devuelve «sin valor por defecto».
     """
-    override = _DEFAULT_OVERRIDES.get((tool_name, param))
-    if override is not None:
-        return override
     props = _iter_properties(_get_tool(tool_name))
     entry = props.get(param, {})
+    if not isinstance(entry, dict):
+        return "sin valor por defecto"
+
+    default_by = entry.get("default_by")
+    if isinstance(default_by, dict):
+        disc = default_by.get("on")
+        mapping = default_by.get("map") or {}
+        chosen = (provided_args or {}).get(disc)
+        if chosen in mapping:
+            return f"{_format_default_value(mapping[chosen])} (por {disc}='{chosen}')"
+        pares = ", ".join(f"{k}={v}" for k, v in mapping.items())
+        return f"según {disc} ({pares})"
+
+    note = entry.get("default_note")
+    if isinstance(note, str) and note:
+        return note
+
     if "default" not in entry:
         return "sin valor por defecto"
     return _format_default_value(entry["default"])
@@ -238,6 +228,16 @@ def get_tool_description(tool_name: str) -> str:
     return desc.split("\n\n", 1)[0].strip()
 
 
+def get_field_metadata(tool_name: str) -> dict[str, dict]:
+    """Devuelve `{param: {description, default, enum, evidence, …}}` de la tool.
+
+    Expone el schema normalizado (incluidas las claves de `json_schema_extra`)
+    para que otros nodos del agente —p. ej. la defensa anti-invención en
+    `reasoning.py`— deriven su metadata del schema MCP sin duplicarla.
+    """
+    return _iter_properties(_get_tool(tool_name))
+
+
 # ── Parámetros opcionales "tunables" ────────────────────────────────────────
 #
 # Son los parámetros con default que afectan materialmente al algoritmo
@@ -246,34 +246,14 @@ def get_tool_description(tool_name: str) -> str:
 #
 # Se excluyen los cosméticos (`with_plot`, `column_name`, `return_metrics`)
 # porque no cambian el resultado analítico.
-
-_DETECT_DRIFT_TUNABLES_BY_METHOD: dict[str, list[str]] = {
-    "KS": ["threshold"],
-    "JS": ["threshold"],
-    "PSI": ["threshold", "num_bins"],
-    "CUSUM": ["threshold", "drift_cusum"],
-    "MEWMA": ["min_instances", "alpha", "lambd"],
-    "HOTELLING": ["min_instances", "alpha"],
-}
-
-_AUGMENT_TUNABLES_BY_STRATEGY: dict[str, list[str]] = {
-    "duplicate": ["duplication_factor", "perturbation_std"],
-    "statistical": ["statistical_type"],
-}
-
-_EXOGENOUS_TUNABLES_BY_RELATION: dict[str, list[str]] = {
-    "linear": ["coefficients"],
-    "polynomial": ["coefficients"],
-}
-
-_TOOL_TUNABLES_STATIC: dict[str, list[str]] = {
-    "forecast_time_series": ["frequency", "model"],
-    "generate_synthetic_arma": [
-        "constant", "noise_std", "seasonality",
-        "ar_coefficients", "ma_coefficients",
-    ],
-    "generate_synthetic_trend": ["noise"],
-}
+#
+# La fuente de verdad es el schema MCP: cada parámetro tunable se marca con
+# ``json_schema_extra``:
+#   * ``{"tunable": true}`` — siempre relevante (p. ej. forecast.frequency).
+#   * ``{"tunable_if": {"<discriminador>": [valores…]}}`` — relevante solo
+#     cuando otro parámetro toma ciertos valores (p. ej. drift.num_bins solo
+#     aplica si method=='PSI'). El nombre del discriminador viaja en el propio
+#     metadato, así que este módulo no necesita conocer method/strategy/relation.
 
 def _is_empty(value: object) -> bool:
     """True si el valor cuenta como ausente (None, cadena vacía o lista vacía)."""
@@ -303,17 +283,25 @@ def get_missing_alternative_groups(tool_name: str, provided_args: dict) -> list[
 def get_tunable_params(tool_name: str, provided_args: dict) -> list[str]:
     """Devuelve los parámetros opcionales relevantes para esta llamada.
 
-    Algunos tools tienen tunables que dependen del valor de otro parámetro
-    (p. ej. `detect_drift` los tunables cambian según `method`); esta función
-    encapsula esa lógica para que el razonador no la conozca.
+    Genérico y schema-driven: recorre las propiedades de la tool e incluye las
+    marcadas con ``tunable`` (siempre) o ``tunable_if`` (cuando el valor actual
+    del discriminador coincide). El razonador no conoce qué parámetro es el
+    discriminador de cada tool: esa relación vive en el schema MCP.
     """
-    if tool_name == "detect_drift":
-        return list(_DETECT_DRIFT_TUNABLES_BY_METHOD.get(provided_args.get("method"), []))
-    if tool_name == "augment_time_series":
-        return list(_AUGMENT_TUNABLES_BY_STRATEGY.get(provided_args.get("strategy"), []))
-    if tool_name == "create_exogenous_variable":
-        return list(_EXOGENOUS_TUNABLES_BY_RELATION.get(provided_args.get("relation"), []))
-    return list(_TOOL_TUNABLES_STATIC.get(tool_name, []))
+    result: list[str] = []
+    for name, info in _iter_properties(_get_tool(tool_name)).items():
+        if not isinstance(info, dict):
+            continue
+        if info.get("tunable") is True:
+            result.append(name)
+            continue
+        cond = info.get("tunable_if")
+        if isinstance(cond, dict):
+            for disc, values in cond.items():
+                if isinstance(values, (list, tuple)) and provided_args.get(disc) in values:
+                    result.append(name)
+                    break
+    return result
 
 
 def get_missing_tunable_params(tool_name: str, provided_args: dict) -> list[str]:
@@ -343,7 +331,11 @@ def _format_required_message(
     return "\n".join(lines)
 
 
-def _format_optional_confirmation_message(tool_name: str, missing_tunable: list[str]) -> str:
+def _format_optional_confirmation_message(
+    tool_name: str,
+    missing_tunable: list[str],
+    provided_args: dict | None = None,
+) -> str:
     lines: list[str] = [
         f"Voy a ejecutar **{tool_name}** y hay varios parámetros opcionales que aún no has indicado. "
         "Estos son sus valores por defecto:",
@@ -351,7 +343,7 @@ def _format_optional_confirmation_message(tool_name: str, missing_tunable: list[
     ]
     for param in missing_tunable:
         desc = get_param_description(tool_name, param)
-        default = get_param_default_text(tool_name, param)
+        default = get_param_default_text(tool_name, param, provided_args)
         lines.append(f"  • **{param}** ({desc}) → default: `{default}`")
     lines.append("")
     lines.append(
@@ -469,7 +461,7 @@ def solicitar_parametros_node(state: AgentState) -> dict:
     missing_tunable = get_missing_tunable_params(pending_tool, collected)
     if missing_tunable:
         return {"messages": [AIMessage(
-            content=_format_optional_confirmation_message(pending_tool, missing_tunable),
+            content=_format_optional_confirmation_message(pending_tool, missing_tunable, collected),
         )]}
 
     return {}

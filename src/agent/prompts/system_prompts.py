@@ -19,6 +19,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.agent.tool_metadata import (
+    ANALYTICAL_TOOL_NAMES,
+    REQUIRED_PARAM_WITH_ENUM,
+    TOOL_EXTRAS,
+    TOOL_ORDER,
+    TOOL_TRIGGERS,
+)
+
+# `ANALYTICAL_TOOL_NAMES` se reexporta (lo importa `src.agent.prompts` y
+# `reasoning.py`); su fuente es ahora `tool_metadata`, derivada de las tools MCP.
+
 
 _ROLE_BLOCK = """\
 Eres un asistente especializado en análisis de series temporales y data drift.
@@ -113,64 +124,16 @@ _BEHAVIOR_FALLBACK = """\
 
 # ── Descripciones de las tools 1..8 (generación dinámica) ──────────────────
 #
-# Antes este bloque era un literal hand-coded que duplicaba información del
-# schema MCP (descripción, parámetros requeridos, valores enum). Ahora se
-# genera leyendo `tool.description` y `tool.args_schema` de cada herramienta
-# cargada vía MCP. Solo se mantienen hand-coded las dos piezas que el schema
-# no expresa:
-#
-#   * `TOOL_TRIGGERS`: frases que disparan la elección de cada tool (guía
-#     al LLM, no derivable).
-#   * `TOOL_EXTRAS`: notas adicionales que ayudan al modelo a usar bien la
-#     tool (enumeraciones complementarias, opcionales destacados, etc.).
-#
-# El orden visual de las 8 tools queda fijado por `_TOOL_ORDER`. El orden
-# de `AGENT_TOOLS` depende del subproceso MCP y no es estable a través de
-# reloads, así que no podemos usarlo directamente.
-
-_TOOL_ORDER: list[str] = [
-    "generate_synthetic_distribution",
-    "generate_synthetic_arma",
-    "generate_synthetic_periodic",
-    "generate_synthetic_trend",
-    "detect_drift",
-    "augment_time_series",
-    "create_exogenous_variable",
-    "forecast_time_series",
-]
-
-TOOL_TRIGGERS: dict[str, str] = {
-    "generate_synthetic_distribution": '"datos sintéticos", "serie aleatoria", "distribución X"',
-    "generate_synthetic_arma": '"ARMA", "AR(p)", "autocorrelación", "memoria temporal"',
-    "generate_synthetic_periodic": '"estacional", "cíclica", "patrón repetido cada N"',
-    "generate_synthetic_trend": '"tendencia", "creciente", "decreciente lineal/polinómico/exponencial"',
-    "detect_drift": '"drift", "ha cambiado", "estabilidad de los datos"',
-    "augment_time_series": '"aumentar datos", "más observaciones", "ampliar dataset"',
-    "create_exogenous_variable": '"variable exógena", "nueva columna", "PCA", "correlación"',
-    "forecast_time_series": '"predecir", "forecast", "futuro", "SARIMAX"',
-}
-
-# Notas opcionales que NO viven en el schema (enumeraciones extra, etc.).
-TOOL_EXTRAS: dict[str, str] = {
-    "generate_synthetic_distribution": "Distribuciones: Normal, Poisson, Beta, Gamma, Uniforme, etc. (códigos 1-17).",
-    "generate_synthetic_arma": "Opcionales: ar_coefficients, ma_coefficients.",
-    "detect_drift": "Univariantes: KS, JS, PSI, CUSUM. Multivariantes: MEWMA, HOTELLING.",
-    "forecast_time_series": "Modelo: SARIMAX.",
-}
-
-# Por tool, el parámetro requerido cuyo enum queremos mostrar inline en la
-# línea "Requiere:" para que el LLM sepa de antemano los valores válidos.
-_REQUIRED_PARAM_WITH_ENUM: dict[str, str] = {
-    "detect_drift": "method",
-    "augment_time_series": "strategy",
-    "create_exogenous_variable": "relation",
-}
+# Este bloque se genera leyendo `tool.description` y `tool.args_schema` de cada
+# herramienta cargada vía MCP. Las piezas que el schema no expresa (orden de
+# presentación, triggers, notas extra, qué enum mostrar inline) viven en el
+# registro único `src/agent/tool_metadata.py`, no aquí.
 
 
 def _build_tools_1_to_8() -> str:
     """Genera la sección "1.…8." del bloque HERRAMIENTAS desde la metadata MCP.
 
-    Para cada tool en `_TOOL_ORDER` lee del schema:
+    Para cada tool en `TOOL_ORDER` lee del schema:
       * `tool.description` (primer párrafo del docstring) como texto principal.
       * lista de parámetros requeridos (auto-derivada del schema).
       * `enum` del parámetro principal (method/strategy/relation) cuando aplica.
@@ -189,11 +152,11 @@ def _build_tools_1_to_8() -> str:
     )
 
     entries: list[str] = []
-    for idx, name in enumerate(_TOOL_ORDER, start=1):
+    for idx, name in enumerate(TOOL_ORDER, start=1):
         desc = get_tool_description(name)
         triggers = TOOL_TRIGGERS.get(name, "")
 
-        enum_param = _REQUIRED_PARAM_WITH_ENUM.get(name)
+        enum_param = REQUIRED_PARAM_WITH_ENUM.get(name)
         required: list[str] = []
         for p in TOOL_REQUIRED_PARAMS.get(name, []):
             if p == enum_param:
@@ -262,19 +225,10 @@ Si una herramienta requiere un fichero CSV, pide al usuario que lo suba
 mediante el panel lateral antes de continuar.
 """
 
-# Herramientas analíticas cuyo resultado debe explicarse con la estructura de
-# tres bloques (RESULTADO / INTERPRETACIÓN / SIGUIENTE PASO). `consultar_teoria`
-# se excluye a propósito: sus respuestas son teóricas y van en prosa natural.
-ANALYTICAL_TOOL_NAMES: frozenset[str] = frozenset({
-    "detect_drift",
-    "forecast_time_series",
-    "augment_time_series",
-    "create_exogenous_variable",
-    "generate_synthetic_distribution",
-    "generate_synthetic_arma",
-    "generate_synthetic_periodic",
-    "generate_synthetic_trend",
-})
+# Las herramientas analíticas cuyo resultado debe explicarse con la estructura
+# de tres bloques (RESULTADO / INTERPRETACIÓN / SIGUIENTE PASO) son todas las
+# del MCP; `ANALYTICAL_TOOL_NAMES` se importa derivado de `tool_metadata`
+# (`consultar_teoria` queda fuera: sus respuestas son teóricas, en prosa).
 
 
 # ── Configuración de ablación ───────────────────────────────────────────────

@@ -156,8 +156,20 @@ class GenerateTrendInput(BaseModel):
 
 @mcp.tool()
 async def generate_synthetic_distribution(
-    start_date: Annotated[str, Field(description="Fecha de inicio 'YYYY-MM-DD'.")],
-    frequency: Annotated[_FREQ, Field(description="'D' diaria, 'W' semanal, 'M' mensual, 'h' horaria.")],
+    start_date: Annotated[
+        str,
+        Field(
+            description="Fecha de inicio 'YYYY-MM-DD'.",
+            json_schema_extra={"evidence": "date"},
+        ),
+    ],
+    frequency: Annotated[
+        _FREQ,
+        Field(
+            description="'D' diaria, 'W' semanal, 'M' mensual, 'h' horaria.",
+            json_schema_extra={"evidence": "freq"},
+        ),
+    ],
     distribution_type: Annotated[
         int,
         Field(
@@ -167,21 +179,28 @@ async def generate_synthetic_distribution(
                 "7=Uniforme[low,high], 9=Exponencial[scale], 10=Gamma[a], 11=Beta[a,b], "
                 "12=ChiCuadrado[df], 13=TStudent[t], 17=Aleatorio[low,high]"
             ),
+            json_schema_extra={"evidence": "distribution_kind"},
         ),
     ],
-    distribution_params: Annotated[list[float], Field(description="Parámetros de la distribución como lista.")],
+    distribution_params: Annotated[
+        list[float],
+        Field(
+            description="Parámetros de la distribución como lista.",
+            json_schema_extra={"evidence": "numeric_list"},
+        ),
+    ],
     end_date: Annotated[
         Optional[str],
         Field(
             description="Fecha de fin 'YYYY-MM-DD'. Excluyente con periods.",
-            json_schema_extra={"oneof_group": "horizon"},
+            json_schema_extra={"oneof_group": "horizon", "evidence": "date"},
         ),
     ] = None,
     periods: Annotated[
         Optional[int],
         Field(
             description="Número de periodos. Excluyente con end_date.",
-            json_schema_extra={"oneof_group": "horizon"},
+            json_schema_extra={"oneof_group": "horizon", "evidence": "integer"},
         ),
     ] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna generada.")] = "valor",
@@ -256,28 +275,52 @@ async def generate_synthetic_distribution(
 
 @mcp.tool()
 async def generate_synthetic_arma(
-    start_date: Annotated[str, Field(description="Fecha de inicio 'YYYY-MM-DD'.")],
-    frequency: Annotated[_FREQ, Field(description="Frecuencia temporal.")],
+    start_date: Annotated[
+        str,
+        Field(
+            description="Fecha de inicio 'YYYY-MM-DD'.",
+            json_schema_extra={"evidence": "date"},
+        ),
+    ],
+    frequency: Annotated[
+        _FREQ,
+        Field(description="Frecuencia temporal.", json_schema_extra={"evidence": "freq"}),
+    ],
     end_date: Annotated[
         Optional[str],
         Field(
             description="Fecha de fin (excluyente con periods).",
-            json_schema_extra={"oneof_group": "horizon"},
+            json_schema_extra={"oneof_group": "horizon", "evidence": "date"},
         ),
     ] = None,
     periods: Annotated[
         Optional[int],
         Field(
             description="Número de periodos (excluyente con end_date).",
-            json_schema_extra={"oneof_group": "horizon"},
+            json_schema_extra={"oneof_group": "horizon", "evidence": "integer"},
         ),
     ] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna generada.")] = "valor",
-    constant: Annotated[float, Field(description="Término constante c del modelo ARMA.")] = 0.0,
-    noise_std: Annotated[float, Field(description="Desviación estándar del ruido blanco.")] = 1.0,
-    seasonality: Annotated[int, Field(description="Periodo de estacionalidad (0 = no estacional).")] = 0,
-    ar_coefficients: Annotated[list[float], Field(description="Coeficientes AR. Lista vacía = sin AR.")] = [],
-    ma_coefficients: Annotated[list[float], Field(description="Coeficientes MA. Lista vacía = sin MA.")] = [],
+    constant: Annotated[
+        float,
+        Field(description="Término constante c del modelo ARMA.", json_schema_extra={"tunable": True}),
+    ] = 0.0,
+    noise_std: Annotated[
+        float,
+        Field(description="Desviación estándar del ruido blanco.", json_schema_extra={"tunable": True}),
+    ] = 1.0,
+    seasonality: Annotated[
+        int,
+        Field(description="Periodo de estacionalidad (0 = no estacional).", json_schema_extra={"tunable": True}),
+    ] = 0,
+    ar_coefficients: Annotated[
+        list[float],
+        Field(description="Coeficientes AR. Lista vacía = sin AR.", json_schema_extra={"tunable": True}),
+    ] = [],
+    ma_coefficients: Annotated[
+        list[float],
+        Field(description="Coeficientes MA. Lista vacía = sin MA.", json_schema_extra={"tunable": True}),
+    ] = [],
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
 ) -> dict:
     """Genera una serie temporal con estructura ARMA(p,q).
@@ -358,24 +401,59 @@ async def generate_synthetic_arma(
 
 @mcp.tool()
 async def generate_synthetic_periodic(
-    start_date: Annotated[str, Field(description="Fecha de inicio 'YYYY-MM-DD'.")],
-    frequency: Annotated[_FREQ, Field(description="Frecuencia temporal.")],
-    distribution_type: Annotated[int, Field(ge=1, le=17, description="Distribución base (ver generate_synthetic_distribution).")],
-    distribution_params: Annotated[list[float], Field(description="Parámetros de la distribución base.")],
-    period_length: Annotated[int, Field(gt=0, description="Cada cuántas observaciones se repite el patrón.")],
-    pattern_type: Annotated[Literal[1, 2], Field(description="1 = variación de amplitud, 2 = variación de cantidad.")],
+    start_date: Annotated[
+        str,
+        Field(
+            description="Fecha de inicio 'YYYY-MM-DD'.",
+            json_schema_extra={"evidence": "date"},
+        ),
+    ],
+    frequency: Annotated[
+        _FREQ,
+        Field(description="Frecuencia temporal.", json_schema_extra={"evidence": "freq"}),
+    ],
+    distribution_type: Annotated[
+        int,
+        Field(
+            ge=1, le=17,
+            description="Distribución base (ver generate_synthetic_distribution).",
+            json_schema_extra={"evidence": "distribution_kind"},
+        ),
+    ],
+    distribution_params: Annotated[
+        list[float],
+        Field(
+            description="Parámetros de la distribución base.",
+            json_schema_extra={"evidence": "numeric_list"},
+        ),
+    ],
+    period_length: Annotated[
+        int,
+        Field(
+            gt=0,
+            description="Cada cuántas observaciones se repite el patrón.",
+            json_schema_extra={"evidence": "integer"},
+        ),
+    ],
+    pattern_type: Annotated[
+        Literal[1, 2],
+        Field(
+            description="1 = variación de amplitud, 2 = variación de cantidad.",
+            json_schema_extra={"evidence": "pattern_kind"},
+        ),
+    ],
     end_date: Annotated[
         Optional[str],
         Field(
             description="Fecha de fin (excluyente con periods).",
-            json_schema_extra={"oneof_group": "horizon"},
+            json_schema_extra={"oneof_group": "horizon", "evidence": "date"},
         ),
     ] = None,
     periods: Annotated[
         Optional[int],
         Field(
             description="Número de periodos (excluyente con end_date).",
-            json_schema_extra={"oneof_group": "horizon"},
+            json_schema_extra={"oneof_group": "horizon", "evidence": "integer"},
         ),
     ] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna.")] = "valor",
@@ -451,26 +529,51 @@ async def generate_synthetic_periodic(
 
 @mcp.tool()
 async def generate_synthetic_trend(
-    start_date: Annotated[str, Field(description="Fecha de inicio 'YYYY-MM-DD'.")],
-    frequency: Annotated[_FREQ, Field(description="Frecuencia temporal.")],
-    trend_type: Annotated[int, Field(ge=1, description="Código del tipo de tendencia (lineal, polinómica, exponencial...).")],
-    trend_params: Annotated[list[float], Field(description="Coeficientes que definen la tendencia.")],
+    start_date: Annotated[
+        str,
+        Field(
+            description="Fecha de inicio 'YYYY-MM-DD'.",
+            json_schema_extra={"evidence": "date"},
+        ),
+    ],
+    frequency: Annotated[
+        _FREQ,
+        Field(description="Frecuencia temporal.", json_schema_extra={"evidence": "freq"}),
+    ],
+    trend_type: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="Código del tipo de tendencia (lineal, polinómica, exponencial...).",
+            json_schema_extra={"evidence": "trend_kind"},
+        ),
+    ],
+    trend_params: Annotated[
+        list[float],
+        Field(
+            description="Coeficientes que definen la tendencia.",
+            json_schema_extra={"evidence": "numeric_list"},
+        ),
+    ],
     end_date: Annotated[
         Optional[str],
         Field(
             description="Fecha de fin (excluyente con periods).",
-            json_schema_extra={"oneof_group": "horizon"},
+            json_schema_extra={"oneof_group": "horizon", "evidence": "date"},
         ),
     ] = None,
     periods: Annotated[
         Optional[int],
         Field(
             description="Número de periodos (excluyente con end_date).",
-            json_schema_extra={"oneof_group": "horizon"},
+            json_schema_extra={"oneof_group": "horizon", "evidence": "integer"},
         ),
     ] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna.")] = "valor",
-    noise: Annotated[float, Field(description="Magnitud del ruido aditivo gaussiano.")] = 0.0,
+    noise: Annotated[
+        float,
+        Field(description="Magnitud del ruido aditivo gaussiano.", json_schema_extra={"tunable": True}),
+    ] = 0.0,
     with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
 ) -> dict:
     """Genera una serie temporal con tendencia determinista.
