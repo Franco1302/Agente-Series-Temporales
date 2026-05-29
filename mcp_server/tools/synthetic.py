@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Literal, Optional
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from mcp_server.config import load_settings
 from mcp_server.errors import translate_exception
@@ -150,6 +150,24 @@ class GenerateTrendInput(BaseModel):
     trend_params: list[float]
     noise: float = 0.0
     with_plot: bool = True
+
+    @model_validator(mode="after")
+    def _check_trend_params_arity(self) -> "GenerateTrendInput":
+        # Aridad exigida por la API: lineal/exponencial/logarítmica → 2 params [a, b];
+        # polinómica → ≥1 coeficiente.
+        required = {1: 2, 3: 2, 4: 2}
+        if self.trend_type in required and len(self.trend_params) != required[self.trend_type]:
+            label = {1: "lineal", 3: "exponencial", 4: "logarítmica"}[self.trend_type]
+            raise ValueError(
+                f"trend_type={self.trend_type} ({label}) requiere exactamente "
+                f"{required[self.trend_type]} parámetros [a, b]; "
+                f"se recibieron {len(self.trend_params)}: {self.trend_params}."
+            )
+        if self.trend_type == 2 and len(self.trend_params) < 1:
+            raise ValueError(
+                "trend_type=2 (polinómica) requiere al menos 1 coeficiente [a0, a1, ...]."
+            )
+        return self
 
 
 # ───────────────────────── 1. generate_synthetic_distribution ─────────────────────────
@@ -417,8 +435,26 @@ async def generate_synthetic_periodic(
 async def generate_synthetic_trend(
     start_date: Annotated[str, Field(description="Fecha de inicio 'YYYY-MM-DD'.")],
     frequency: Annotated[_FREQ, Field(description="Frecuencia temporal.")],
-    trend_type: Annotated[int, Field(ge=1, description="Código del tipo de tendencia (lineal, polinómica, exponencial...).")],
-    trend_params: Annotated[list[float], Field(description="Coeficientes que definen la tendencia.")],
+    trend_type: Annotated[
+        int,
+        Field(
+            ge=1, le=4,
+            description=(
+                "Tipo de tendencia: 1=Lineal [a,b], 2=Polinómica [a0,a1,...,an], "
+                "3=Exponencial [a,b], 4=Logarítmica [a,b]."
+            ),
+        ),
+    ],
+    trend_params: Annotated[
+        list[float],
+        Field(
+            description=(
+                "Coeficientes de la tendencia. Aridad por tipo: lineal/exponencial/"
+                "logarítmica requieren EXACTAMENTE 2 ([a, b]); polinómica admite ≥1 "
+                "([a0, a1, ...])."
+            ),
+        ),
+    ],
     end_date: Annotated[Optional[str], Field(description="Fecha de fin (excluyente con periods).")] = None,
     periods: Annotated[Optional[int], Field(description="Número de periodos (excluyente con end_date).")] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna.")] = "valor",

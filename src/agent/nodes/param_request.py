@@ -120,6 +120,18 @@ _PARAM_DESCRIPTIONS: dict[str, str] = {
 # Se excluyen los cosméticos (`with_plot`, `column_name`, `return_metrics`)
 # porque no cambian el resultado analítico.
 
+# Política de tunables (parámetros opcionales que afectan al algoritmo):
+#
+#   * Para drift, MANTENEMOS la confirmación interactiva. ``threshold`` decide
+#     si hay drift o no, ``num_bins`` modula el cálculo del PSI, ``alpha`` el
+#     límite de control del MEWMA/HOTELLING, etc. Ejecutar con defaults
+#     silenciosos puede llevar al usuario a conclusiones equivocadas; aquí la
+#     fluidez no compensa el riesgo.
+#
+#   * Para el resto (ruido en synthetic_trend, coeficientes ARMA, modelo de
+#     forecast…) los maps quedan vacíos: si el usuario no los menciona, se
+#     omiten del JSON y la API aplica sus defaults sin preguntar. Son
+#     parámetros menos sensibles o se pueden cambiar trivialmente reejecutando.
 _DETECT_DRIFT_TUNABLES_BY_METHOD: dict[str, list[str]] = {
     "KS": ["threshold"],
     "JS": ["threshold"],
@@ -128,25 +140,9 @@ _DETECT_DRIFT_TUNABLES_BY_METHOD: dict[str, list[str]] = {
     "MEWMA": ["min_instances", "alpha", "lambd"],
     "HOTELLING": ["min_instances", "alpha"],
 }
-
-_AUGMENT_TUNABLES_BY_STRATEGY: dict[str, list[str]] = {
-    "duplicate": ["duplication_factor", "perturbation_std"],
-    "statistical": ["statistical_type"],
-}
-
-_EXOGENOUS_TUNABLES_BY_RELATION: dict[str, list[str]] = {
-    "linear": ["coefficients"],
-    "polynomial": ["coefficients"],
-}
-
-_TOOL_TUNABLES_STATIC: dict[str, list[str]] = {
-    "forecast_time_series": ["frequency", "model"],
-    "generate_synthetic_arma": [
-        "constant", "noise_std", "seasonality",
-        "ar_coefficients", "ma_coefficients",
-    ],
-    "generate_synthetic_trend": ["noise"],
-}
+_AUGMENT_TUNABLES_BY_STRATEGY: dict[str, list[str]] = {}
+_EXOGENOUS_TUNABLES_BY_RELATION: dict[str, list[str]] = {}
+_TOOL_TUNABLES_STATIC: dict[str, list[str]] = {}
 
 # Descripciones + default-as-text para cada tunable. Se usa para construir el
 # mensaje de confirmación que ve el usuario.
@@ -232,36 +228,50 @@ def _format_required_message(
     missing: list[str],
     missing_groups: list[list[str]] | None = None,
 ) -> str:
-    lines: list[str] = [
-        "Para continuar necesito algunos datos adicionales. Por favor, proporciona:"
-    ]
+    """Mensaje al usuario pidiendo parámetros faltantes.
+
+    Formato deliberadamente distinto del estilo natural del LLM (sin bullets en
+    negrita, sin secciones RESULTADO/INTERPRETACIÓN): los modelos cuantizados
+    imitan los patrones que ven en el historial; si esta pregunta se parecía a
+    una respuesta del LLM, el agente la copiaba en turnos posteriores en lugar
+    de razonar y emitir tool_call.
+    """
+    partes: list[str] = []
     for param in missing:
         desc = _PARAM_DESCRIPTIONS.get(param, f"el valor de '{param}'")
-        lines.append(f"  • **{param}**: {desc}")
+        partes.append(f"`{param}` ({desc})")
     for group in missing_groups or []:
-        alternativas = " **o** ".join(f"**{p}** ({_PARAM_DESCRIPTIONS.get(p, p)})" for p in group)
-        lines.append(f"  • Uno de: {alternativas}")
-    return "\n".join(lines)
+        alternativas = " o ".join(
+            f"`{p}` ({_PARAM_DESCRIPTIONS.get(p, p)})" for p in group
+        )
+        partes.append(f"uno entre {alternativas}")
+    if not partes:
+        return "Faltan datos para continuar."
+    return (
+        "Para continuar con la herramienta necesito que indiques: "
+        + "; ".join(partes)
+        + "."
+    )
 
 
 def _format_optional_confirmation_message(tool_name: str, missing_tunable: list[str]) -> str:
-    lines: list[str] = [
-        f"Voy a ejecutar **{tool_name}** y hay varios parámetros opcionales que aún no has indicado. "
-        "Estos son sus valores por defecto:",
-        "",
-    ]
+    """Confirmación de tunables opcionales. Mismo principio que el mensaje de
+    parámetros obligatorios: una sola línea, sin estructura imitable.
+    """
+    partes: list[str] = []
     for param in missing_tunable:
         desc, default = _OPTIONAL_PARAM_INFO.get(
             param, (f"el parámetro '{param}'", "valor por defecto del sistema")
         )
-        lines.append(f"  • **{param}** ({desc}) → default: `{default}`")
-    lines.append("")
-    lines.append(
-        "Responde **sí** (o «usa los defaults») para ejecutar con esos valores, o "
-        "indícame los que quieras cambiar con la sintaxis `nombre=valor` "
-        "(ejemplo: `threshold=0.3, num_bins=20`)."
+        partes.append(f"`{param}` ({desc}) → `{default}`")
+    if not partes:
+        return f"¿Confirmas la ejecución de `{tool_name}` con los valores por defecto?"
+    return (
+        f"Voy a ejecutar `{tool_name}`. Estos son los valores por defecto de los "
+        f"parámetros opcionales: " + "; ".join(partes) + ". "
+        "Responde «sí» para usar estos defaults, o indica los que quieras cambiar "
+        "con la sintaxis `nombre=valor` (p. ej. `threshold=0.3, num_bins=20`)."
     )
-    return "\n".join(lines)
 
 
 # ── Parser de la respuesta del usuario a la confirmación de opcionales ──────

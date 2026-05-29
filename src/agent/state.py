@@ -48,3 +48,18 @@ class AgentState(TypedDict):
 
     # Descripción estructurada del último error para informar al usuario
     error_info: Optional[str]
+
+    # Memoria estructurada de la sesión usada para la herencia genérica de
+    # parámetros entre herramientas. Esquema:
+    #   "by_param": dict[param_name -> {value, source_tool, turn}]
+    #       Vista pivotada por parámetro: cada entrada apunta al último valor
+    #       observado en una ejecución exitosa, con qué tool lo produjo y en
+    #       qué turno (índice ordinal). Solo se registran parámetros que
+    #       pertenecen a alguna familia semántica heredable
+    #       (`src.agent.param_families.INHERITABLE_PARAMS`), nunca params de
+    #       dominio que cambien la semántica del análisis.
+    #   "by_tool":  dict[tool_name -> {args_completos_de_la_ultima_ejecucion}]
+    #       Snapshot completo de la última ejecución exitosa de cada tool.
+    #       Útil para auditoría y para escenarios "repítelo" dirigidos a una
+    #       tool concreta.
+    session_facts: Optional[dict]

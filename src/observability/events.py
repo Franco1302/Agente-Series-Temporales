@@ -24,6 +24,7 @@ EVENT_TOOL_CALL_START = "tool_call_start"
 EVENT_TOOL_CALL_END = "tool_call_end"
 EVENT_API_HTTP = "api_http"
 EVENT_RAG_RETRIEVAL = "rag_retrieval"
+EVENT_PARAMS_INHERITED = "params_inherited"
 EVENT_ERROR = "error"
 
 

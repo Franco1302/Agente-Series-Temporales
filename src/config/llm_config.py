@@ -31,6 +31,7 @@ class OllamaSettings:
     temperature: float
     request_timeout: float
     num_ctx: int
+    max_context_turns: int
 
 
 def _read_required_env(variable_name: str, default_value: str | None = None) -> str:
@@ -81,6 +82,12 @@ def load_ollama_settings() -> OllamaSettings:
     num_ctx_raw = os.getenv("OLLAMA_NUM_CTX")
     num_ctx = int(num_ctx_raw) if num_ctx_raw and num_ctx_raw.strip().isdigit() else 8192
 
+    # Nº de turnos de usuario (con sus respuestas asociadas) que se conservan
+    # en el contexto del LLM. Modelos cuantizados pequeños imitan patrones del
+    # historial largo; truncar reduce esa contaminación.
+    turns_raw = os.getenv("CHAT_MAX_CONTEXT_TURNS")
+    max_context_turns = int(turns_raw) if turns_raw and turns_raw.strip().isdigit() else 8
+
     if not 0.0 <= temperature <= 2.0:
         raise ValueError("OLLAMA_TEMPERATURE debe estar entre 0.0 y 2.0.")
 
@@ -90,12 +97,16 @@ def load_ollama_settings() -> OllamaSettings:
     if num_ctx <= 0:
         raise ValueError("OLLAMA_NUM_CTX debe ser un entero positivo.")
 
+    if max_context_turns <= 0:
+        raise ValueError("CHAT_MAX_CONTEXT_TURNS debe ser un entero positivo.")
+
     return OllamaSettings(
         base_url=base_url,
         model=model,
         temperature=temperature,
         request_timeout=request_timeout,
         num_ctx=num_ctx,
+        max_context_turns=max_context_turns,
     )
 
 

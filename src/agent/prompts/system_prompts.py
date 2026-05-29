@@ -33,20 +33,23 @@ IDIOMA: Razona y responde siempre en español, independientemente del idioma del
 #: Regla CRÍTICA anti-invención de parámetros. Vive dentro de ``_BEHAVIOR_BLOCK``
 #: cuando ``PromptAblation.include_no_invent`` es ``True``.
 RULE_NO_INVENT = """\
-- REGLA CRÍTICA — nunca, bajo ningún concepto, inventes ni asumas valores por
-  defecto para parámetros que el usuario no haya proporcionado. Si dudas de un valor,
-  OMITE el parámetro entero del JSON de argumentos. Mejor una tool call con
-  arguments={} que una tool call con valores inventados.
-  Ejemplo: si el usuario solo dice "genera una serie temporal sintética" sin más
-  detalles, debes invocar generate_synthetic_series con arguments={} (sin start_date,
-  sin periods, sin frequency, sin distribution_type, sin distribution_params).
-  El nodo solicitar_parametros pedirá al usuario los datos que falten."""
+- NO inventes valores. Un parámetro solo puede aparecer en el JSON si (a) está
+  en el [CONTEXTO DE SESIÓN] o (b) el usuario lo dijo en este turno. Si no
+  cumple ninguna de las dos, OMÍTELO del JSON (mejor arguments={} que valores
+  inventados). El sistema preguntará al usuario lo que falte.
+  Ejemplo: si el usuario dice solo «Genera una serie sintética con distribución
+  normal» y no hay [CONTEXTO DE SESIÓN], emite
+  generate_synthetic_distribution con arguments={} — NO inventes start_date,
+  NO inventes distribution_type, NO inventes distribution_params, NO inventes
+  column_name, NO inventes frequency, NO inventes periods."""
 
 #: Viñeta del bloque BEHAVIOR que obliga a usar ``consultar_teoria`` para teoría.
 RULE_THEORY_TOOL_BEHAVIOR = """\
-- Para cualquier pregunta teórica sobre data drift, tests estadísticos, series
-  temporales o conceptos relacionados, invoca SIEMPRE la herramienta consultar_teoria
-  con una `query` reformulada y precisa que capture lo que el usuario quiere saber."""
+- Cualquier pregunta teórica sobre drift, tests estadísticos, series temporales o
+  conceptos análogos exige invocar `consultar_teoria` con una `query` reformulada.
+  Patrones típicos de petición teórica: «¿qué es X?», «explícame Y», «definición
+  de Z», «cómo funciona W», «háblame de V», «diferencias entre…». NUNCA respondas
+  de memoria, ni siquiera si crees conocer la respuesta."""
 
 #: Última línea de la sección REGLAS del bloque TOOLS sobre uso obligatorio
 #: de ``consultar_teoria`` para teoría.
@@ -57,17 +60,18 @@ RULE_THEORY_TOOL_REGLAS = (
 
 #: Descripción de la tool nº 9 cuando la regla de teoría está activa: enfática
 #: ("SIEMPRE", "No respondas de memoria").
-_TOOL9_DESC_WITH_RULE = """\
-9. consultar_teoria — SIEMPRE para preguntas teóricas (qué es drift, ARMA, p-valor,
-   diferencias entre tests, fundamentos de series temporales). No respondas de
-   memoria; usa esta herramienta. Requiere: query."""
+_TOOL9_DESC_WITH_RULE = (
+    "- consultar_teoria — SIEMPRE para preguntas teóricas (qué es drift, ARMA, p-valor, "
+    "diferencias entre tests, fundamentos de series temporales). No respondas de memoria."
+)
 
 #: Variante neutra de la descripción de la tool nº 9 cuando la regla se desactiva
 #: (la herramienta sigue existiendo y se describe; lo que se quita es la
 #: directiva imperativa de uso obligatorio).
-_TOOL9_DESC_NEUTRAL = """\
-9. consultar_teoria — Recupera contexto teórico sobre data drift, tests
-   estadísticos, series temporales y conceptos relacionados. Requiere: query."""
+_TOOL9_DESC_NEUTRAL = (
+    "- consultar_teoria — Recupera contexto teórico sobre data drift, tests "
+    "estadísticos, series temporales y conceptos relacionados."
+)
 
 #: Dos ejemplos few-shot del bloque RESULTADO / INTERPRETACIÓN / SIGUIENTE PASO.
 FEWSHOT_EXAMPLES = """\
@@ -91,71 +95,48 @@ empieza a crecer en producción."""
 # Subviñetas no ablacionables del bloque de comportamiento.
 _BEHAVIOR_INTRO = """\
 COMPORTAMIENTO:
-- Cuando la petición del usuario coincida con una herramienta, INVOCA la herramienta
-  siempre, incluso si faltan parámetros obligatorios. Pasa SOLO los parámetros que el
-  usuario haya escrito EXPLÍCITAMENTE en su mensaje y OMITE COMPLETAMENTE el resto.
-  El sistema validará los argumentos: si falta alguno, pedirá al usuario los datos
-  automáticamente. NO redactes preguntas sobre parámetros faltantes en el contenido
-  del mensaje: emite la tool call y deja que el grafo se encargue de la validación."""
+- Si la petición del usuario coincide con alguna herramienta del listado, EMITE
+  la tool call inmediatamente, aunque queden argumentos por rellenar o no tengas
+  ninguno. Faltar parámetros NO es razón para responder en texto: el sistema
+  tiene un nodo que pide al usuario los obligatorios que falten. Tu única tarea
+  es emitir la tool call; no preguntes tú los parámetros, no propongas valores
+  «por ejemplo», no pidas confirmación de valores que el usuario acaba de dar.
+- Para los argumentos: incluye los valores del [CONTEXTO DE SESIÓN] cuando
+  existan y los que el usuario mencione en este turno. Cualquier otro
+  parámetro, déjalo fuera del JSON.
+- Si existe [CONTEXTO DE SESIÓN] y la nueva petición es del mismo dominio,
+  emite la tool call REUTILIZANDO esos valores. No los vuelvas a pedir."""
 
 _BEHAVIOR_CAPABILITIES = """\
-- Si el usuario hace una pregunta sobre tus capacidades o sobre cómo usarte, responde
-  directamente sin invocar ninguna herramienta."""
+- Pregunta sobre tus capacidades → responde en texto sin tool call."""
 
 _BEHAVIOR_RAG_FORMAT = """\
-- El contexto que devuelve consultar_teoria es material de referencia interno:
-  redacta tu respuesta con tus PROPIAS PALABRAS y en prosa natural. NO copies los
-  fragmentos literalmente ni reproduzcas etiquetas del contexto como «Fragmento»,
-  «Fuente», «Jerarquía» o «Fuentes consultadas». NO escribas tú una sección de
-  fuentes: el sistema añade la cita automáticamente al final de la respuesta."""
+- Cuando uses el contexto de consultar_teoria, redacta con tus PROPIAS PALABRAS
+  en prosa natural. No copies fragmentos literales ni etiquetas («Fragmento»,
+  «Fuente», «Jerarquía»). No escribas tú una sección de fuentes: el sistema la
+  añade automáticamente."""
 
 _BEHAVIOR_FALLBACK = """\
-- Si la petición del usuario es genuinamente ambigua y no encaja con ninguna
-  herramienta, pide aclaración en texto plano sin emitir tool call."""
+- Solo responde en texto cuando la petición trate de un tema FUERA del dominio
+  de tus herramientas (charla casual, traducción, código ajeno, etc.). Una
+  petición de series/drift/forecast a la que le faltan parámetros NO está fuera
+  de dominio: emite la tool call."""
 
-# Descripciones de las tools 1..8 (siempre presentes).
+# Descripciones de las tools 1..8 (siempre presentes). Solo propósito + triggers.
+# Las firmas (parámetros, tipos, defaults) viven en el bindTools del LLM; duplicarlas
+# en el prompt confunde a modelos cuantizados y los hace responder texto vacío.
 _TOOLS_1_TO_8 = """\
-1. generate_synthetic_distribution — Genera datos siguiendo una distribución estadística
-   (Normal, Poisson, Beta, Gamma, Uniforme...). Triggers: "datos sintéticos", "serie aleatoria",
-   "distribución X". Requiere: start_date, frequency, distribution_type (1-17),
-   distribution_params. Pasa periods O end_date, no ambos.
-
-2. generate_synthetic_arma — Genera serie con autocorrelación temporal (AR/MA/ARMA).
-   Triggers: "ARMA", "AR(p)", "autocorrelación", "memoria temporal".
-   Requiere: start_date, frequency. Opcionales: ar_coefficients, ma_coefficients.
-
-3. generate_synthetic_periodic — Genera serie con patrones cíclicos (estacionalidad).
-   Triggers: "estacional", "cíclica", "patrón repetido cada N".
-   Requiere: start_date, frequency, period_length, pattern_type, distribution_type,
-   distribution_params.
-
-4. generate_synthetic_trend — Genera serie con tendencia determinista.
-   Triggers: "tendencia", "creciente", "decreciente lineal/polinómico/exponencial".
-   Requiere: start_date, frequency, trend_type, trend_params.
-
-5. detect_drift — Detecta cambio de distribución en un CSV.
-   Triggers: "drift", "ha cambiado", "estabilidad de los datos".
-   Requiere: file_path, index_column, method ∈ {KS, JS, PSI, CUSUM, MEWMA, HOTELLING}.
-   Univariantes: KS, JS, PSI, CUSUM. Multivariantes: MEWMA, HOTELLING.
-
-6. augment_time_series — Amplía un CSV con observaciones nuevas.
-   Triggers: "aumentar datos", "más observaciones", "ampliar dataset".
-   Requiere: file_path, index_column, strategy ∈ {normal, muller, duplicate,
-   harmonic, statistical}, size, frequency.
-
-7. create_exogenous_variable — Añade columna derivada al CSV.
-   Triggers: "variable exógena", "nueva columna", "PCA", "correlación".
-   Requiere: file_path, index_column, new_column_name, relation ∈
-   {pca, correlation, covariance, linear, polynomial}.
-
-8. forecast_time_series — Predice horizonte futuro de una serie con SARIMAX.
-   Triggers: "predecir", "forecast", "futuro", "SARIMAX".
-   Requiere: file_path, index_column, target_column, forecast_steps."""
+- generate_synthetic_distribution — datos según una distribución (Normal, Poisson, Beta, Gamma, Uniforme...). Triggers: "datos sintéticos", "serie aleatoria", "distribución X".
+- generate_synthetic_arma — serie con autocorrelación temporal (AR/MA/ARMA). Triggers: "ARMA", "AR(p)", "autocorrelación", "memoria temporal".
+- generate_synthetic_periodic — serie con patrones cíclicos / estacionalidad. Triggers: "estacional", "cíclica", "patrón repetido cada N".
+- generate_synthetic_trend — serie con tendencia determinista. Triggers: "tendencia", "creciente", "decreciente", "lineal/polinómico/exponencial".
+- detect_drift — detección de cambio de distribución en un CSV (univariante: KS, JS, PSI, CUSUM; multivariante: MEWMA, HOTELLING). Triggers: "drift", "ha cambiado", "estabilidad de los datos".
+- augment_time_series — ampliar un CSV con observaciones nuevas. Triggers: "aumentar datos", "más observaciones", "ampliar dataset".
+- create_exogenous_variable — añadir columna derivada al CSV (PCA, correlación, lineal, polinómica). Triggers: "variable exógena", "nueva columna", "PCA".
+- forecast_time_series — predicción del horizonte futuro con SARIMAX. Triggers: "predecir", "forecast", "futuro", "SARIMAX"."""
 
 # Reglas comunes (no ablacionables) del bloque TOOLS.
-_TOOLS_REGLAS_COMUNES = """\
-- Si la tool requiere file_path y no hay CSV cargado: pide al usuario que lo suba.
-- No inventes parámetros opcionales: si dudas, omítelos del JSON."""
+_TOOLS_REGLAS_COMUNES = "- Si una tool necesita file_path y no hay CSV cargado, pide al usuario que lo suba."
 
 # Cabecera del bloque "EXPLICACIÓN DE RESULTADOS" (sin los ejemplos few-shot).
 _EXPLAIN_RESULT_HEADER = """\
@@ -292,6 +273,7 @@ def build_system_prompt(
     csv_metadata: dict | None = None,
     tool_result_to_explain: str | None = None,
     ablation: PromptAblation | None = None,
+    session_context: str | None = None,
 ) -> str:
     """Construye el prompt del sistema adaptado al contexto de la sesión.
 
@@ -307,17 +289,20 @@ def build_system_prompt(
             RULE_THEORY_TOOL, FEWSHOT_EXAMPLES). Si es None, se usa
             ``PromptAblation()`` (todo activado), idéntico al comportamiento
             anterior al refactor.
+        session_context: Texto ya formateado del bloque ``[CONTEXTO DE SESIÓN]``.
+            Se inserta entre el rol y el comportamiento para que el LLM lo vea
+            antes de decidir si emite tool call. None u "" → no se inyecta.
 
     Returns:
         Prompt del sistema completo listo para pasarlo como SystemMessage.
     """
     cfg = ablation or _DEFAULT_ABLATION
 
-    blocks: list[str] = [
-        _ROLE_BLOCK,
-        _build_behavior_block(cfg),
-        _build_tools_block(cfg),
-    ]
+    blocks: list[str] = [_ROLE_BLOCK]
+    if session_context:
+        blocks.append(session_context)
+    blocks.append(_build_behavior_block(cfg))
+    blocks.append(_build_tools_block(cfg))
 
     if tool_result_to_explain in ANALYTICAL_TOOL_NAMES:
         blocks.append(_build_explain_result_block(cfg))
