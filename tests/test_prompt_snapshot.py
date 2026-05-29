@@ -98,10 +98,11 @@ def test_theory_tool_off_removes_both_directives_and_swaps_tool9() -> None:
     assert RULE_THEORY_TOOL_BEHAVIOR not in ablated
     assert RULE_THEORY_TOOL_REGLAS not in ablated
 
-    # La descripción enfática ("SIEMPRE para preguntas teóricas... No respondas
-    # de memoria") se sustituye por la neutra ("Recupera contexto teórico...").
-    assert "SIEMPRE para preguntas teóricas" in full
-    assert "SIEMPRE para preguntas teóricas" not in ablated
+    # La descripción con regla ("...para preguntas conceptuales... Úsala en vez
+    # de responder de memoria") se sustituye por la neutra ("Recupera contexto
+    # teórico... Requiere: query.", sin la coletilla de uso obligatorio).
+    assert "Úsala en vez de responder de memoria" in full
+    assert "Úsala en vez de responder de memoria" not in ablated
     assert "Recupera contexto teórico" in ablated
     # La tool sigue listada en algún punto del prompt (es necesaria para que el
     # binding del LLM la encuentre cuando hace falta).

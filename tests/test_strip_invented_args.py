@@ -491,7 +491,7 @@ def test_delegation_directive_injected_when_pending_and_missing():
                 }],
             )
 
-    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None: _FakeLLM()):
+    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None, temperature=None: _FakeLLM()):
         updates = reasoning_mod.razonador_node(state)
 
     # La directiva DEBE estar entre los mensajes que recibió el LLM.
@@ -528,7 +528,7 @@ def test_delegation_directive_injected_when_no_pending_tool():
             captured.append(list(messages))
             return AIMessage(content="OK")
 
-    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None: _FakeLLM()):
+    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None, temperature=None: _FakeLLM()):
         reasoning_mod.razonador_node(state)
 
     from langchain_core.messages import SystemMessage
@@ -558,7 +558,7 @@ def test_delegation_directive_not_injected_without_delegation():
             captured.append(list(messages))
             return AIMessage(content="OK")
 
-    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None: _FakeLLM()):
+    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None, temperature=None: _FakeLLM()):
         reasoning_mod.razonador_node(state)
 
     from langchain_core.messages import SystemMessage
@@ -602,7 +602,7 @@ def test_razonador_node_routes_to_pending_when_llm_invents_args():
         def invoke(self, _messages):
             return inventive
 
-    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None: _FakeLLM()):
+    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None, temperature=None: _FakeLLM()):
         updates = reasoning_mod.razonador_node(state)
 
     assert updates["pending_tool"] == "generate_synthetic_distribution"

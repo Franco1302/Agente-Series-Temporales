@@ -11,8 +11,8 @@ del Capítulo 6 (ver `scripts/ablation_eval.py`):
   * ``RULE_THEORY_TOOL``    — obliga a usar ``consultar_teoria`` para teoría.
   * ``FEWSHOT_EXAMPLES``    — dos ejemplos (drift, forecast) del bloque explicar.
 
-Por defecto las tres están activas y el prompt es byte-exact al de antes del
-refactor (ver ``tests/test_prompt_snapshot.py``).
+Por defecto las tres están activas; el prompt resultante está fijado por
+snapshot en ``tests/test_prompt_snapshot.py`` (regenerar al cambiar el prompt).
 """
 
 from __future__ import annotations
@@ -42,32 +42,25 @@ IDIOMA: Razona y responde siempre en español, independientemente del idioma del
 #: Regla CRÍTICA anti-invención de parámetros. Vive dentro de ``_BEHAVIOR_BLOCK``
 #: cuando ``PromptAblation.include_no_invent`` es ``True``.
 RULE_NO_INVENT = """\
-- REGLA — no inventes valores por defecto que el usuario no haya escrito.
-  Si dudas, OMITE el parámetro del JSON: arguments={} es preferible a valores
-  inventados. EXCEPCIÓN: si el usuario delega explícitamente ("usa los
-  defaults", "cualquiera", "lo que sea", "como tú quieras", "no me importa"),
-  propón TÚ valores razonables, justifica brevemente tu elección y completa
-  la tool call — eso es delegación, no invención."""
+- No inventes valores que el usuario no haya dado: si dudas de un parámetro,
+  omítelo del JSON (el sistema lo pedirá)."""
 
-#: Viñeta del bloque BEHAVIOR que obliga a usar ``consultar_teoria`` para teoría.
+#: Viñeta del bloque BEHAVIOR que orienta a usar ``consultar_teoria`` para teoría.
 RULE_THEORY_TOOL_BEHAVIOR = """\
-- Para cualquier pregunta teórica sobre data drift, tests estadísticos, series
-  temporales o conceptos relacionados, invoca SIEMPRE la herramienta consultar_teoria
-  con una `query` reformulada y precisa que capture lo que el usuario quiere saber."""
+- Para preguntas teóricas (qué es algo, diferencias entre métodos, conceptos),
+  usa la herramienta consultar_teoria en vez de responder de memoria."""
 
-#: Última línea de la sección REGLAS del bloque TOOLS sobre uso obligatorio
-#: de ``consultar_teoria`` para teoría.
+#: Última línea de la sección REGLAS del bloque TOOLS sobre uso de
+#: ``consultar_teoria`` para teoría.
 RULE_THEORY_TOOL_REGLAS = (
-    "- Para preguntas teóricas usa SIEMPRE consultar_teoria, "
-    "nunca respondas de memoria."
+    "- Para preguntas teóricas usa consultar_teoria en vez de responder de memoria."
 )
 
-#: Descripción de la tool nº 9 cuando la regla de teoría está activa: enfática
-#: ("SIEMPRE", "No respondas de memoria").
+#: Descripción de la tool nº 9 cuando la regla de teoría está activa.
 _TOOL9_DESC_WITH_RULE = """\
-9. consultar_teoria — SIEMPRE para preguntas teóricas (qué es drift, ARMA, p-valor,
-   diferencias entre tests, fundamentos de series temporales). No respondas de
-   memoria; usa esta herramienta. Requiere: query."""
+9. consultar_teoria — Recupera contexto teórico para preguntas conceptuales (qué
+   es drift, ARMA, p-valor, diferencias entre tests, fundamentos de series
+   temporales). Úsala en vez de responder de memoria. Requiere: query."""
 
 #: Variante neutra de la descripción de la tool nº 9 cuando la regla se desactiva
 #: (la herramienta sigue existiendo y se describe; lo que se quita es la
@@ -98,27 +91,16 @@ empieza a crecer en producción."""
 # Subviñetas no ablacionables del bloque de comportamiento.
 _BEHAVIOR_INTRO = """\
 COMPORTAMIENTO:
-- Cuando la petición del usuario coincida con una herramienta, INVOCA la herramienta
-  siempre, incluso si faltan parámetros obligatorios. Pasa SOLO los parámetros que el
-  usuario haya escrito EXPLÍCITAMENTE en su mensaje y OMITE COMPLETAMENTE el resto.
-  El sistema validará los argumentos: si falta alguno, pedirá al usuario los datos
-  automáticamente. NO redactes preguntas sobre parámetros faltantes en el contenido
-  del mensaje: emite la tool call y deja que el grafo se encargue de la validación."""
-
-_BEHAVIOR_CAPABILITIES = """\
-- Si el usuario hace una pregunta sobre tus capacidades o sobre cómo usarte, responde
-  directamente sin invocar ninguna herramienta."""
+- Cuando uses una herramienta, pasa solo los parámetros que el usuario haya
+  indicado; omite el resto. El sistema validará y pedirá los que falten."""
 
 _BEHAVIOR_RAG_FORMAT = """\
-- El contexto que devuelve consultar_teoria es material de referencia interno:
-  redacta tu respuesta con tus PROPIAS PALABRAS y en prosa natural. NO copies los
-  fragmentos literalmente ni reproduzcas etiquetas del contexto como «Fragmento»,
-  «Fuente», «Jerarquía» o «Fuentes consultadas». NO escribas tú una sección de
-  fuentes: el sistema añade la cita automáticamente al final de la respuesta."""
+- Responde las preguntas teóricas con tus propias palabras, en prosa; no copies
+  los fragmentos del contexto ni añadas una sección de fuentes (se añade
+  automáticamente al final)."""
 
 _BEHAVIOR_FALLBACK = """\
-- Si la petición del usuario es genuinamente ambigua y no encaja con ninguna
-  herramienta, pide aclaración en texto plano sin emitir tool call."""
+- Si la petición no encaja con ninguna herramienta, pide una aclaración breve."""
 
 # ── Descripciones de las tools 1..8 (generación dinámica) ──────────────────
 #
@@ -140,7 +122,7 @@ def _build_tools_1_to_8() -> str:
     "rellenarlos" e iría contra ese diseño.
 
     Para cada tool en ``TOOL_ORDER`` toma ``tool.description`` (primer párrafo del
-    docstring) y los ``TOOL_TRIGGERS`` (hand-coded).
+    docstring) y su frase de propósito en ``TOOL_TRIGGERS``.
     """
     # Import dentro de la función para evitar ciclos al cargar el módulo.
     from src.agent.nodes.param_request import get_tool_description
@@ -148,10 +130,10 @@ def _build_tools_1_to_8() -> str:
     entries: list[str] = []
     for idx, name in enumerate(TOOL_ORDER, start=1):
         desc = get_tool_description(name)
-        triggers = TOOL_TRIGGERS.get(name, "")
+        purpose = TOOL_TRIGGERS.get(name, "")
         entries.append("\n".join([
             f"{idx}. {name} — {desc}",
-            f"   Triggers: {triggers}.",
+            f"   Úsala cuando: {purpose}.",
         ]))
 
     return "\n\n".join(entries)
@@ -245,7 +227,6 @@ def _build_behavior_block(ablation: PromptAblation) -> str:
     lines: list[str] = [_BEHAVIOR_INTRO]
     if ablation.include_no_invent:
         lines.append(RULE_NO_INVENT)
-    lines.append(_BEHAVIOR_CAPABILITIES)
     if ablation.include_theory_tool:
         lines.append(RULE_THEORY_TOOL_BEHAVIOR)
     lines.append(_BEHAVIOR_RAG_FORMAT)

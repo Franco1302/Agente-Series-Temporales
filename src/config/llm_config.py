@@ -29,6 +29,7 @@ class OllamaSettings:
     base_url: str
     model: str
     temperature: float
+    synthesis_temperature: float
     request_timeout: float
     num_ctx: int
     max_context_turns: int
@@ -76,6 +77,11 @@ def load_ollama_settings() -> OllamaSettings:
     base_url = _read_required_env("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
     model = _read_required_env("OLLAMA_MODEL", "llama3.1")
     temperature = _read_float_env("OLLAMA_TEMPERATURE", 0.2)
+    # Temperatura para la SÍNTESIS de texto (turno posterior a una tool
+    # analítica): algo más alta para variar el lenguaje del bloque
+    # RESULTADO/INTERPRETACIÓN/SIGUIENTE PASO (RF-11) sin afectar a la emisión
+    # de tool calls ni a la clasificación del router, que usan `temperature`.
+    synthesis_temperature = _read_float_env("OLLAMA_SYNTHESIS_TEMPERATURE", 0.4)
     request_timeout = _read_float_env("OLLAMA_REQUEST_TIMEOUT", 8.0)
     # El default de Ollama (2048) es insuficiente para nuestro system prompt (~5k chars)
     # + esquemas de las 9 tools. Con num_ctx pequeño el modelo trunca y devuelve vacío.
@@ -91,6 +97,9 @@ def load_ollama_settings() -> OllamaSettings:
     if not 0.0 <= temperature <= 2.0:
         raise ValueError("OLLAMA_TEMPERATURE debe estar entre 0.0 y 2.0.")
 
+    if not 0.0 <= synthesis_temperature <= 2.0:
+        raise ValueError("OLLAMA_SYNTHESIS_TEMPERATURE debe estar entre 0.0 y 2.0.")
+
     if request_timeout <= 0:
         raise ValueError("OLLAMA_REQUEST_TIMEOUT debe ser mayor que 0.")
 
@@ -104,6 +113,7 @@ def load_ollama_settings() -> OllamaSettings:
         base_url=base_url,
         model=model,
         temperature=temperature,
+        synthesis_temperature=synthesis_temperature,
         request_timeout=request_timeout,
         num_ctx=num_ctx,
         max_context_turns=max_context_turns,
@@ -126,23 +136,37 @@ def _check_ollama_connection(base_url: str, timeout: float) -> None:
             "y que OLLAMA_BASE_URL sea correcto."
         ) from exc
 
-# Cachea el cliente ChatOllama para evitar recrearlo en cada interacción, mejorando la eficiencia.
-@lru_cache(maxsize=1)
-def get_chat_ollama() -> ChatOllama:
+# Cachea el cliente por temperatura: las llamadas de routing/emisión usan la
+# temperatura base (JSON fiable) y la síntesis de texto usa una más alta. Cada
+# valor distinto produce un cliente cacheado; el healthcheck se hace una vez por
+# temperatura, lo cual es despreciable.
+@lru_cache(maxsize=8)
+def _build_chat_ollama(temperature: float) -> ChatOllama:
     settings = load_ollama_settings()
-
     try:
         _check_ollama_connection(settings.base_url, settings.request_timeout)
         return ChatOllama(
             model=settings.model,
             base_url=settings.base_url,
-            temperature=settings.temperature,
+            temperature=temperature,
             num_ctx=settings.num_ctx,
         )
     except Exception as exc:
         raise RuntimeError(
             "No se pudo inicializar ChatOllama. Revisa el servicio de Ollama y los valores de .env."
         ) from exc
+
+
+def get_chat_ollama(temperature: float | None = None) -> ChatOllama:
+    """Devuelve un cliente ChatOllama cacheado por temperatura.
+
+    Args:
+        temperature: Temperatura de muestreo. Si es ``None`` se usa
+            ``OLLAMA_TEMPERATURE`` (la base). Pásala explícita para las llamadas
+            de síntesis (``OLLAMA_SYNTHESIS_TEMPERATURE``) o de clasificación.
+    """
+    temp = load_ollama_settings().temperature if temperature is None else temperature
+    return _build_chat_ollama(temp)
 
 
 @dataclass(frozen=True)
@@ -219,7 +243,9 @@ def thin_tool_schemas(tools: list, thin_names: set[str] | frozenset[str]) -> lis
     return out
 
 
-def get_llm_with_tools(tools: list, tool_choice: Any = None) -> Any:
+def get_llm_with_tools(
+    tools: list, tool_choice: Any = None, temperature: float | None = None
+) -> Any:
     """Devuelve un ChatOllama con las herramientas enlazadas para Tool Calling.
 
     A diferencia de `get_chat_ollama`, esta función no se cachea porque la lista
@@ -232,6 +258,8 @@ def get_llm_with_tools(tools: list, tool_choice: Any = None) -> Any:
             una tool call en vez de responder en texto. Se usa en los
             seguimientos que heredan parámetros, donde el modelo cuantizado
             tiende a imitar en prosa la plantilla de petición de datos.
+        temperature: Temperatura de muestreo del cliente base. ``None`` usa la
+            base; la síntesis de texto pasa ``OLLAMA_SYNTHESIS_TEMPERATURE``.
 
     Returns:
         ChatOllama con `.bind_tools(tools)` aplicado, listo para usar en nodos LangGraph.
@@ -239,7 +267,7 @@ def get_llm_with_tools(tools: list, tool_choice: Any = None) -> Any:
     Raises:
         RuntimeError: Si no se puede inicializar el cliente base de Ollama.
     """
-    base_llm = get_chat_ollama()
+    base_llm = get_chat_ollama(temperature=temperature)
     if tool_choice is not None:
         return base_llm.bind_tools(tools, tool_choice=tool_choice)
     return base_llm.bind_tools(tools)

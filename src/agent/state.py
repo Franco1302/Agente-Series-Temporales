@@ -49,6 +49,21 @@ class AgentState(TypedDict):
     # Descripción estructurada del último error para informar al usuario
     error_info: Optional[str]
 
+    # Intención del turno actual, fijada por el nodo router
+    # (`clasificar_intencion`): "analisis" | "teoria" | "texto" | "continuacion".
+    # El razonador la usa para decidir si fuerza la tool call (analisis/teoria) o
+    # responde en prosa (texto). "continuacion" indica que hay una recogida de
+    # parámetros en curso (pending_tool) y el router se cortocircuitó sin gastar
+    # una llamada al LLM.
+    intent: Optional[str]
+
+    # Herramienta que el router asoció a la petición (None para texto). Se usa
+    # como ÚLTIMA red: si el modelo ignora `tool_choice` y no emite tool call ni
+    # forzado, el razonador construye la tool call de esta herramienta de forma
+    # determinista y deja que solicitar_parametros recoja los datos. La elección
+    # del propio LLM (cuando sí emite) siempre tiene prioridad sobre esta.
+    intent_tool: Optional[str]
+
     # Memoria estructurada de la sesión usada para la herencia genérica de
     # parámetros entre herramientas. Esquema:
     #   "by_param": dict[param_name -> {value, source_tool, turn}]

@@ -134,7 +134,7 @@ def _make_fake_llm(tool: str, args: dict[str, Any]):
         def invoke(self, _messages):
             return forgetful
 
-    return lambda _tools, tool_choice=None: _FakeLLM()
+    return lambda _tools, tool_choice=None, temperature=None: _FakeLLM()
 
 
 def _run_forgetful_case(case: ForgetfulCase) -> tuple[bool, str]:

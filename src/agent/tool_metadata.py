@@ -3,7 +3,9 @@
 Aquí vive SOLO lo que es estrategia de prompting/UX de *este* agente y que NO
 puede derivarse del schema MCP (la fuente de verdad del contrato de las tools):
 
-  * ``TOOL_TRIGGERS``            — frases que orientan al LLM a elegir la tool.
+  * ``TOOL_TRIGGERS``            — frase de PROPÓSITO ("úsala cuando…") de cada
+    tool, para que el modelo razone por intención en vez de pattern-matchear
+    palabras clave. La misma frase alimenta el prompt del nodo router.
   * ``MUST_CITE_FIELDS``        — campos de SALIDA que deben citarse en la
     respuesta (no están en el schema de entrada).
   * ``TOOL_ORDER``             — orden visual de las tools en el prompt.
@@ -46,14 +48,37 @@ TOOL_ORDER: list[str] = [
 ]
 
 TOOL_TRIGGERS: dict[str, str] = {
-    "generate_synthetic_distribution": '"datos sintéticos", "serie aleatoria", "distribución X"',
-    "generate_synthetic_arma": '"ARMA", "AR(p)", "autocorrelación", "memoria temporal"',
-    "generate_synthetic_periodic": '"estacional", "cíclica", "patrón repetido cada N"',
-    "generate_synthetic_trend": '"tendencia", "creciente", "decreciente lineal/polinómico/exponencial"',
-    "detect_drift": '"drift", "ha cambiado", "estabilidad de los datos"',
-    "augment_time_series": '"aumentar datos", "más observaciones", "ampliar dataset"',
-    "create_exogenous_variable": '"variable exógena", "nueva columna", "PCA", "correlación"',
-    "forecast_time_series": '"predecir", "forecast", "futuro", "SARIMAX"',
+    "generate_synthetic_distribution": (
+        "el usuario quiere crear datos nuevos desde cero siguiendo una "
+        "distribución estadística (normal, uniforme, Poisson…), sin partir de un fichero"
+    ),
+    "generate_synthetic_arma": (
+        "el usuario quiere generar una serie con dependencia temporal tipo "
+        "ARMA/AR/MA (autocorrelación, memoria temporal)"
+    ),
+    "generate_synthetic_periodic": (
+        "el usuario quiere generar una serie con un patrón estacional o cíclico "
+        "que se repite cada cierto periodo"
+    ),
+    "generate_synthetic_trend": (
+        "el usuario quiere generar una serie con una tendencia creciente o "
+        "decreciente (lineal, polinómica o exponencial)"
+    ),
+    "detect_drift": (
+        "el usuario quiere saber si la distribución de una serie ha cambiado o "
+        "si hay drift / pérdida de estabilidad"
+    ),
+    "augment_time_series": (
+        "el usuario quiere ampliar o aumentar una serie existente con más observaciones"
+    ),
+    "create_exogenous_variable": (
+        "el usuario quiere añadir una variable o columna nueva derivada de la "
+        "serie (p. ej. por PCA o correlación)"
+    ),
+    "forecast_time_series": (
+        "el usuario quiere predecir o pronosticar valores futuros de una serie "
+        "(p. ej. con SARIMAX)"
+    ),
 }
 
 # Campos deterministas (string/entero) de SALIDA que deben citarse literalmente
