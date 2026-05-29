@@ -784,6 +784,29 @@ def _replay_pending_tool_call(state: AgentState) -> dict:
     }
 
 
+def _build_session_facts_hint(session_facts: dict) -> str:
+    """Genera el bloque ``[CONTEXTO DE SESIÓN]`` con los parámetros heredables.
+
+    Versión compacta: una línea por parámetro con su valor. Se inyecta en el
+    system prompt para que el LLM sepa qué argumentos ya están establecidos en
+    la sesión y no los vuelva a pedir ni los invente. Si ``by_param`` está
+    vacío devuelve "" y el prompt se construye sin el bloque.
+    """
+    by_param = (session_facts or {}).get("by_param") or {}
+    if not by_param:
+        return ""
+    lines = [
+        "[CONTEXTO DE SESIÓN]",
+        "Parámetros ya conocidos en esta conversación (úsalos en cualquier tool call que los acepte):",
+    ]
+    for name, fact in by_param.items():
+        value = fact.get("value")
+        rendered = f'"{value}"' if isinstance(value, str) else str(value)
+        lines.append(f"  {name} = {rendered}")
+    # Línea en blanco final para separar visualmente del bloque siguiente.
+    return "\n".join(lines) + "\n"
+
+
 def _inherit_from_session(
     tool_name: str,
     args: dict,
@@ -870,6 +893,14 @@ def razonador_node(state: AgentState) -> dict:
 
     messages = list(state["messages"])
 
+    # Construimos [CONTEXTO DE SESIÓN] con los parámetros heredables ya
+    # establecidos. `build_system_prompt` lo inyecta arriba (entre rol y
+    # comportamiento) para que el LLM lo vea antes de decidir si emite tool
+    # call. Si el modelo lo ignora, la pasada de herencia (más abajo) rellena
+    # igualmente los args al final.
+    session_facts = state.get("session_facts") or {}
+    facts_hint = _build_session_facts_hint(session_facts) if session_facts else ""
+
     # Si el último ToolMessage proviene de una herramienta analítica, el prompt
     # incorpora el bloque RESULTADO / INTERPRETACIÓN / SIGUIENTE PASO para que la
     # síntesis final cumpla RF-11. `build_system_prompt` ignora los nombres que no
@@ -879,6 +910,7 @@ def razonador_node(state: AgentState) -> dict:
         csv_path=csv_path,
         csv_metadata=csv_metadata,
         tool_result_to_explain=last_tool,
+        session_context=facts_hint or None,
     )
 
     # Inyectar system prompt si el primer mensaje no es ya un SystemMessage
