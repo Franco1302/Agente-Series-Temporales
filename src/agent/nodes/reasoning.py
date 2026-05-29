@@ -18,6 +18,7 @@ from src.agent.nodes.param_request import (
     is_cancel_intent,
     parse_optional_values,
 )
+from src.agent.param_families import INHERITABLE_PARAMS
 from src.agent.prompts import ANALYTICAL_TOOL_NAMES, build_system_prompt
 from src.agent.state import AgentState
 from src.agent.tools import AGENT_TOOLS
@@ -27,6 +28,19 @@ from src.observability import emit_llm_call
 _MAX_ERRORS = 3
 
 _KNOWN_TOOL_NAMES = {t.name for t in AGENT_TOOLS}
+
+# Schema cacheado de cada tool: nombres de parámetros que su firma acepta.
+# Se usa para descartar la herencia de un parámetro si la tool destino no lo
+# declara (evita inyectar args inválidos que el ToolNode rechazaría).
+_TOOL_ACCEPTED_PARAMS: dict[str, frozenset[str]] = {}
+for _t in AGENT_TOOLS:
+    _schema = getattr(_t, "args_schema", None)
+    if _schema is not None and hasattr(_schema, "model_fields"):
+        _TOOL_ACCEPTED_PARAMS[_t.name] = frozenset(_schema.model_fields.keys())
+    elif isinstance(_schema, dict):
+        _TOOL_ACCEPTED_PARAMS[_t.name] = frozenset((_schema.get("properties") or {}).keys())
+    else:
+        _TOOL_ACCEPTED_PARAMS[_t.name] = frozenset()
 _JSON_TOOLCALL_RE = re.compile(
     r'\{[^{}]*"name"\s*:\s*"(?P<name>[\w\-]+)"[^{}]*"(?:arguments|args|parameters)"\s*:\s*(?P<args>\{.*?\})\s*\}',
     re.DOTALL,
@@ -770,6 +784,53 @@ def _replay_pending_tool_call(state: AgentState) -> dict:
     }
 
 
+def _inherit_from_session(
+    tool_name: str,
+    args: dict,
+    session_facts: dict,
+) -> tuple[dict, list[dict]]:
+    """Rellena ``args`` con parámetros heredables que ya estén en la sesión.
+
+    Política (silenciosa y determinista):
+      * Solo se rellena un parámetro si pertenece a ``INHERITABLE_PARAMS``
+        (familias semánticas declaradas en ``src.agent.param_families``).
+      * Solo se rellena si la tool destino acepta ese parámetro según su
+        ``args_schema``. Evita inyectar args inválidos.
+      * NUNCA sobrescribe un valor que el LLM ya emitió. Si el usuario
+        redefinió un parámetro en el turno actual, se respeta su intención.
+
+    Devuelve ``(args_enriquecidos, breadcrumbs)`` donde ``breadcrumbs`` es una
+    lista de dicts ``{name, value, source_tool}`` con cada herencia aplicada.
+
+    Esta pasada COMPLEMENTA a ``_strip_invented_args``: aquel quita los args
+    inventados sin respaldo; este rellena los que el usuario sí estableció en
+    turnos anteriores. Orden recomendado: strip → merge_pending → inherit.
+    """
+    nonempty = lambda v: v not in (None, "", [])  # noqa: E731
+    by_param = (session_facts or {}).get("by_param") or {}
+    accepted = _TOOL_ACCEPTED_PARAMS.get(tool_name, frozenset())
+
+    enriched = dict(args)
+    inherited: list[dict] = []
+    for name, fact in by_param.items():
+        if name not in INHERITABLE_PARAMS:
+            continue
+        if name not in accepted:
+            continue
+        if nonempty(enriched.get(name)):
+            continue
+        value = fact.get("value")
+        if not nonempty(value):
+            continue
+        enriched[name] = value
+        inherited.append({
+            "name": name,
+            "value": value,
+            "source_tool": fact.get("source_tool"),
+        })
+    return enriched, inherited
+
+
 def razonador_node(state: AgentState) -> dict:
     """Invoca el LLM con el estado actual y decide la próxima acción.
 
@@ -900,6 +961,33 @@ def razonador_node(state: AgentState) -> dict:
         call = tool_calls[0]
         tool_name = call.get("name", "") if isinstance(call, dict) else getattr(call, "name", "")
         args = call.get("args", {}) if isinstance(call, dict) else getattr(call, "args", {})
+
+        # Herencia genérica desde session_facts: rellena los parámetros de las
+        # familias semánticas (temporal_window, data_source, series_identity)
+        # que ya estén establecidos en sesión y que la tool destino acepte en su
+        # firma. Complementa a _strip_invented_args: aquel ya retiró los args
+        # inventados; este restaura los que el usuario sí estableció antes.
+        # Excepción: consultar_teoria se exime — su `query` la reformula el LLM
+        # libremente y no hay herencia útil entre turnos teóricos.
+        session_facts = state.get("session_facts") or {}
+        if tool_name != "consultar_teoria":
+            enriched_args, inherited = _inherit_from_session(tool_name, args, session_facts)
+            if inherited:
+                call_id = (
+                    call.get("id") if isinstance(call, dict) else getattr(call, "id", None)
+                ) or f"call_{uuid.uuid4().hex[:12]}"
+                response = AIMessage(
+                    content=response.content,
+                    tool_calls=[{
+                        "name": tool_name,
+                        "args": enriched_args,
+                        "id": call_id,
+                        "type": "tool_call",
+                    }],
+                    additional_kwargs=getattr(response, "additional_kwargs", {}) or {},
+                )
+                updates["messages"] = [response]
+                args = enriched_args
 
         missing = get_missing_params(tool_name, args)
         missing_groups = get_missing_alternative_groups(tool_name, args)
