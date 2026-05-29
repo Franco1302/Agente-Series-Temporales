@@ -62,15 +62,21 @@ def route_after_error(state: AgentState) -> str:
     """Decide el siguiente nodo tras gestionar_error.
 
     - Si se alcanzó el límite de errores → generar_respuesta (abortar con disculpa)
-    - Si el error parece de parámetros   → solicitar_parametros (pedir datos al usuario)
-    - Por defecto (errores no recuperables: timeouts, conexión, runtime) → generar_respuesta
+    - Si el error parece de parámetros Y hay un pending_tool con datos que
+      recoger → solicitar_parametros (pedir datos al usuario)
+    - Por defecto (errores no recuperables: timeouts, conexión, runtime, o
+      errores de parámetros sin pending_tool) → generar_respuesta
     """
     error_count = state.get("error_count", 0)
     if error_count >= 3:
         return "generar_respuesta"
 
+    # Solo tiene sentido pedir parámetros si hay una tool pendiente que los
+    # espera. Un error de validación de una tool ya ejecutada (p. ej. aridad de
+    # trend_params) llega sin pending_tool: enrutarlo a solicitar_parametros
+    # produciría un fin silencioso, así que lo reportamos vía generar_respuesta.
     error_info = (state.get("error_info") or "").lower()
-    if any(kw in error_info for kw in _PARAM_ERROR_KEYWORDS):
+    if state.get("pending_tool") and any(kw in error_info for kw in _PARAM_ERROR_KEYWORDS):
         return "solicitar_parametros"
 
     return "generar_respuesta"

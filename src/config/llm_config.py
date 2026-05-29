@@ -172,7 +172,7 @@ def load_observability_settings() -> ObservabilitySettings:
     return ObservabilitySettings(enabled=enabled, log_level=log_level)
 
 
-def get_llm_with_tools(tools: list) -> Any:
+def get_llm_with_tools(tools: list, tool_choice: Any = None) -> Any:
     """Devuelve un ChatOllama con las herramientas enlazadas para Tool Calling.
 
     A diferencia de `get_chat_ollama`, esta función no se cachea porque la lista
@@ -181,6 +181,10 @@ def get_llm_with_tools(tools: list) -> Any:
 
     Args:
         tools: Lista de herramientas LangChain decoradas con @tool.
+        tool_choice: Si se pasa (p. ej. ``"any"``), fuerza al modelo a emitir
+            una tool call en vez de responder en texto. Se usa en los
+            seguimientos que heredan parámetros, donde el modelo cuantizado
+            tiende a imitar en prosa la plantilla de petición de datos.
 
     Returns:
         ChatOllama con `.bind_tools(tools)` aplicado, listo para usar en nodos LangGraph.
@@ -189,4 +193,6 @@ def get_llm_with_tools(tools: list) -> Any:
         RuntimeError: Si no se puede inicializar el cliente base de Ollama.
     """
     base_llm = get_chat_ollama()
+    if tool_choice is not None:
+        return base_llm.bind_tools(tools, tool_choice=tool_choice)
     return base_llm.bind_tools(tools)

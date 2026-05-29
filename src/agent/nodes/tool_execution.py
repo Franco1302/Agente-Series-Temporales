@@ -190,6 +190,19 @@ def tool_execution_node(state: AgentState) -> dict:
             result["session_facts"] = _update_session_facts(
                 existing_facts, tool_name, executed_args, turn_idx
             )
+            # Éxito: limpia cualquier estado de error de turnos previos para que
+            # route_after_tool no desvíe por error_info obsoleto.
+            result["error_info"] = None
+            result["error_count"] = 0
+        else:
+            # La tool devolvió {"error": …} (la API falló, p. ej. 500). Hasta
+            # ahora esto pasaba inadvertido: error_info quedaba None, el flujo
+            # iba a razonador y, con la plantilla RESULTADO activa, el modelo
+            # INVENTABA un éxito. Señalamos el error para que route_after_tool
+            # vaya a gestionar_error y se reporte de forma honesta. No tocamos
+            # error_count: lo incrementa gestionar_error_node.
+            err = data.get("error") if isinstance(data, dict) else None
+            result["error_info"] = str(err) if err else "La herramienta devolvió un error."
 
     return result
 

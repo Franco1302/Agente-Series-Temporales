@@ -11,6 +11,7 @@ from typing import Callable
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from src.agent.nodes.param_request import (
+    TOOL_ALTERNATIVE_GROUPS,
     get_field_metadata,
     get_missing_alternative_groups,
     get_missing_params,
@@ -375,6 +376,59 @@ def _build_delegation_directive(
             "una frase antes del JSON. NO preguntes al usuario."
         )
     return SystemMessage(content=body)
+
+
+# Frases con las que el usuario pide una operación NUEVA reutilizando parámetros
+# de un turno anterior ("ahora con los parámetros anteriores…", "los mismos
+# parámetros pero…", "como antes pero…"). A diferencia de la delegación, aquí no
+# cede la elección de un valor: pide reutilizar lo ya establecido en la sesión.
+# El modelo cuantizado, ante este seguimiento cross-tool, tiende a responder en
+# prosa imitando la plantilla "Para continuar necesito…" en vez de emitir el
+# JSON; la directiva de abajo lo corrige.
+_FOLLOWUP_REUSE_KEYWORDS: tuple[str, ...] = (
+    "anteriores", "de antes", "los de antes",
+    "mismos par[áa]metros", "esos par[áa]metros", "los mismos", "las mismas",
+    "como antes", "igual que antes", "reutiliz", "reusa", "vuelve a usar",
+    "c[oó]ge los", "usa los", "con esos",
+)
+
+
+def _is_inheriting_followup(user_text: str, session_facts: dict) -> bool:
+    """True si el usuario pide algo nuevo reutilizando parámetros ya conocidos.
+
+    Solo se considera seguimiento heredante si (a) hay parámetros heredables en
+    sesión (``session_facts['by_param']`` no vacío) y (b) el texto referencia
+    explícitamente reutilizar valores previos. Ser estricto en (b) evita que la
+    directiva se dispare en preguntas teóricas u otras peticiones no analíticas.
+    """
+    by_param = (session_facts or {}).get("by_param") or {}
+    if not by_param:
+        return False
+    return _has_any_keyword(user_text, _FOLLOWUP_REUSE_KEYWORDS)
+
+
+def _build_followup_directive(session_facts: dict) -> SystemMessage:
+    """Directiva que fuerza la tool call en un seguimiento que hereda parámetros.
+
+    Mismo patrón que ``_build_delegation_directive``: no construimos la tool call
+    por código, solo indicamos al LLM que debe emitir el JSON ahora en lugar de
+    responder en texto. La herencia genérica (``_inherit_from_session``) rellenará
+    los parámetros de las familias semánticas; si falta un obligatorio nuevo de la
+    tool destino, la validación de parámetros lo pedirá de forma normal.
+    """
+    known = ", ".join(sorted((session_facts or {}).get("by_param", {}).keys()))
+    body = (
+        "El usuario pide una operación NUEVA reutilizando parámetros ya "
+        "conocidos en esta conversación (ver [CONTEXTO DE SESIÓN]"
+        + (f": {known}" if known else "")
+        + "). DEBES identificar la herramienta adecuada a su nueva petición y "
+        "emitir AHORA el JSON de la tool call, heredando esos parámetros. NO "
+        "respondas en texto ni repitas la plantilla de petición de datos: si "
+        "algún parámetro obligatorio nuevo falta de verdad, emite igualmente la "
+        "tool call con lo que tengas y el sistema lo pedirá."
+    )
+    return SystemMessage(content=body)
+
 
 # Mapas de palabras-clave para los enums semánticos (el LLM hace traducción
 # legítima «normal» → 1, «kolmogorov-smirnov» → KS; queremos detectar que
@@ -799,6 +853,19 @@ def _inherit_from_session(
     nonempty = lambda v: v not in (None, "", [])  # noqa: E731
     by_param = (session_facts or {}).get("by_param") or {}
     accepted = _TOOL_ACCEPTED_PARAMS.get(tool_name, frozenset())
+    groups = TOOL_ALTERNATIVE_GROUPS.get(tool_name, [])
+
+    def _xor_sibling_already_set(param: str) -> bool:
+        """True si otro miembro del grupo XOR de ``param`` ya está fijado.
+
+        Sin esto, heredar (p. ej.) ``periods`` desde la sesión cuando el LLM ya
+        emitió ``end_date`` deja ambos miembros del grupo ``horizon`` y la API
+        rechaza la llamada ("periods o end_date, pero no ambos").
+        """
+        for grp in groups:
+            if param in grp:
+                return any(nonempty(enriched.get(m)) for m in grp if m != param)
+        return False
 
     enriched = dict(args)
     inherited: list[dict] = []
@@ -808,6 +875,8 @@ def _inherit_from_session(
         if name not in accepted:
             continue
         if nonempty(enriched.get(name)):
+            continue
+        if _xor_sibling_already_set(name):
             continue
         value = fact.get("value")
         if not nonempty(value):
@@ -897,6 +966,7 @@ def razonador_node(state: AgentState) -> dict:
     # responde en texto plano y entra en bucle de preguntas. El LLM sigue
     # razonando: nosotros solo le indicamos que está autorizado a decidir.
     last_human_text = _last_human_message_content(messages)
+    force_tool_call = False
     if last_human_text and _user_delegates(last_human_text):
         pending_params = state.get("pending_params") or {}
         missing = (
@@ -908,6 +978,24 @@ def razonador_node(state: AgentState) -> dict:
         # pending_tool con missing, le dice qué params completar; si no falta
         # nada, le dice que invoque ya con lo que hay.
         messages = messages + [_build_delegation_directive(pending_tool_state, missing)]
+    elif last_human_text and _is_inheriting_followup(last_human_text, session_facts):
+        # Seguimiento que reutiliza parámetros de un turno anterior ("ahora con
+        # los parámetros anteriores, una con tendencia…"). El modelo cuantizado
+        # tiende a responder en texto imitando la plantilla de petición de datos
+        # que vio en turnos previos, sin emitir el JSON (H-B1). Ni la directiva
+        # de prompt ni `tool_choice="any"` bastan con el historial completo:
+        # Ollama ignora el tool_choice cuando el contexto es largo y contiene
+        # esas plantillas. La cura es recrear las condiciones del primer turno
+        # (que sí funciona): invocar con un contexto COMPACTO — solo el system
+        # prompt (que ya incluye [CONTEXTO DE SESIÓN] con los params heredables),
+        # la última petición del usuario y la directiva — más `tool_choice="any"`.
+        # El historial pesado no aporta aquí: los params viven en session_facts.
+        messages = [
+            messages[0],  # SystemMessage (rol + [CONTEXTO DE SESIÓN] + comportamiento)
+            HumanMessage(content=last_human_text),
+            _build_followup_directive(session_facts),
+        ]
+        force_tool_call = True
 
     # Selección de tools: si el último ToolMessage es de consultar_teoria,
     # excluimos esa tool del bind para impedir bucles RAG → RAG → RAG.
@@ -916,7 +1004,7 @@ def razonador_node(state: AgentState) -> dict:
     else:
         tools_for_bind = AGENT_TOOLS
 
-    llm = get_llm_with_tools(tools_for_bind)
+    llm = get_llm_with_tools(tools_for_bind, tool_choice="any" if force_tool_call else None)
     t0 = time.perf_counter()
     raw_response = llm.invoke(messages)
     duration_ms = (time.perf_counter() - t0) * 1000.0

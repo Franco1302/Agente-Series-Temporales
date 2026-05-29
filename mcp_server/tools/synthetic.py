@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Literal, Optional
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from mcp_server.config import load_settings
 from mcp_server.errors import translate_exception
@@ -139,6 +139,21 @@ class GeneratePeriodicInput(BaseModel):
     with_plot: bool = True
 
 
+# Nº de coeficientes que la API exige en `trend_params` según `trend_type`.
+# Contrato real (drift-detection/api/series_sinteticas/funciones_generales.py,
+# tendencia_det): tipos 1/3/4 hacen params[0] y params[1] → exigen exactamente
+# 2; el tipo 2 (polinómica) usa toda la lista → exige al menos 1. Sin esta
+# validación, enviar 1 coeficiente a una exponencial provoca un IndexError 500
+# en la API en vez de un mensaje claro.
+_TREND_PARAM_ARITY: dict[int, tuple[int, Optional[int]]] = {
+    1: (2, 2),       # lineal: [a, b]
+    2: (1, None),    # polinómica: [a0, a1, …, an]
+    3: (2, 2),       # exponencial: [a, b]
+    4: (2, 2),       # logarítmica: [a, b]
+}
+_TREND_TYPE_NAMES: dict[int, str] = {1: "lineal", 2: "polinómica", 3: "exponencial", 4: "logarítmica"}
+
+
 class GenerateTrendInput(BaseModel):
     """Schema interno para series con tendencia determinista y ruido opcional."""
     start_date: str
@@ -150,6 +165,23 @@ class GenerateTrendInput(BaseModel):
     trend_params: list[float]
     noise: float = 0.0
     with_plot: bool = True
+
+    @model_validator(mode="after")
+    def _check_trend_params_arity(self) -> "GenerateTrendInput":
+        bounds = _TREND_PARAM_ARITY.get(self.trend_type)
+        if bounds is None:
+            return self  # tipo desconocido: deja que la API lo rechace
+        lo, hi = bounds
+        n = len(self.trend_params)
+        if n < lo or (hi is not None and n > hi):
+            nombre = _TREND_TYPE_NAMES.get(self.trend_type, str(self.trend_type))
+            esperado = f"exactamente {lo}" if lo == hi else f"al menos {lo}"
+            raise ValueError(
+                f"La tendencia {nombre} (tipo {self.trend_type}) requiere {esperado} "
+                f"coeficiente(s) en trend_params, pero se recibieron {n}: {self.trend_params}. "
+                f"Indica los coeficientes correctos (p. ej. lineal/exponencial/logarítmica → [a, b])."
+            )
+        return self
 
 
 # ───────────────────────── 1. generate_synthetic_distribution ─────────────────────────
@@ -544,14 +576,18 @@ async def generate_synthetic_trend(
         int,
         Field(
             ge=1,
-            description="Código del tipo de tendencia (lineal, polinómica, exponencial...).",
+            description="Código del tipo de tendencia: 1=lineal, 2=polinómica, 3=exponencial, 4=logarítmica.",
             json_schema_extra={"evidence": "trend_kind"},
         ),
     ],
     trend_params: Annotated[
         list[float],
         Field(
-            description="Coeficientes que definen la tendencia.",
+            description=(
+                "Coeficientes que definen la tendencia. El número depende del tipo: "
+                "lineal/exponencial/logarítmica (1/3/4) requieren EXACTAMENTE 2 coeficientes [a, b]; "
+                "polinómica (2) requiere al menos 1 [a0, a1, …, an]."
+            ),
             json_schema_extra={"evidence": "numeric_list"},
         ),
     ],

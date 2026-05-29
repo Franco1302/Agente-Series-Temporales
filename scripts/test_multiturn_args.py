@@ -135,7 +135,7 @@ def _make_fake_llm(tool: str, args: dict[str, Any]):
         def invoke(self, _messages):
             return forgetful
 
-    return lambda _tools: _FakeLLM()
+    return lambda _tools, tool_choice=None: _FakeLLM()
 
 
 def _run_forgetful_case(case: ForgetfulCase) -> tuple[bool, str]:
@@ -369,6 +369,112 @@ def _e2e_synthetic() -> bool:
     return True
 
 
+def _e2e_synthetic_followup() -> bool:
+    """E2E de reproducción del bug de seguimiento con herencia (cross-tool).
+
+    Reproduce el flujo exacto reportado:
+      1. "Genera una serie sintética con distribución normal" → pide params.
+      2. "Desde 2024-01-01, 365 puntos diarios, μ=50 y σ=10" → pide periods (XOR).
+      3. "Usa 365 periods" → ejecuta generate_synthetic_distribution y puebla
+         session_facts.by_param con la familia temporal_window.
+      4. "Ahora con los parámetros anteriores quiero que me crees una pero con
+         tendencia lineal" → es OTRA tool (generate_synthetic_trend) que debe
+         heredar start_date/frequency/periods.
+
+    El bug: en el turno 4 el agente responde en texto plano SIN emitir tool_call.
+    Aserción: el turno 4 debe producir un tool_call de generate_synthetic_trend
+    (ejecutado o a la espera de obligatorios nuevos vía pending_tool). FALLA si
+    el último mensaje es texto plano sin ninguna tool_call.
+
+    Discriminación de causa (sin instrumentación extra):
+      * tool_calls vacío + ai_text  → H-B1 (el LLM no emitió tool_call).
+      * tool_call presente con args vacíos → H-B2 (_strip_invented_args).
+    """
+    build_agent_graph.cache_clear()
+    graph = build_agent_graph()
+    config: dict[str, Any] = {"configurable": {"thread_id": "e2e-synth-followup"}}
+
+    t1 = _stream_turn(
+        graph,
+        {
+            "messages": [HumanMessage(content="Genera una serie sintética con distribución normal.")],
+            "csv_path": None,
+            "error_count": 0,
+        },
+        config,
+    )
+    _print_turn("E2E followup TURNO 1", t1)
+
+    t2 = _stream_turn(
+        graph,
+        {"messages": [HumanMessage(content=(
+            "Desde 2024-01-01, 365 puntos diarios, distribución normal tipo 1 "
+            "con parámetros [50.0, 10.0]."
+        ))]},
+        config,
+    )
+    _print_turn("E2E followup TURNO 2", t2)
+
+    t3 = _stream_turn(
+        graph,
+        {"messages": [HumanMessage(content="Usa 365 periods.")]},
+        config,
+    )
+    _print_turn("E2E followup TURNO 3 (aporta periods=365)", t3)
+
+    ejecuto_dist = any(
+        name == "generate_synthetic_distribution" and "error" not in content.lower()
+        for name, content in t3["tool_results"]
+    )
+    if not ejecuto_dist:
+        print(
+            "  SKIP E2E followup: turnos 1-3 no ejecutaron la distribución "
+            "(¿API analítica caída?). No se puede reproducir la herencia."
+        )
+        return True
+
+    # Turno 4: el turno del bug. Otra tool (tendencia) reutilizando params previos.
+    t4 = _stream_turn(
+        graph,
+        {"messages": [HumanMessage(content=(
+            "Ahora con los parámetros anteriores quiero que me crees una pero "
+            "con tendencia lineal."
+        ))]},
+        config,
+    )
+    _print_turn("E2E followup TURNO 4 (tendencia, hereda params)", t4)
+
+    trend_call = any(name == "generate_synthetic_trend" for name, _ in t4["tool_calls"])
+    trend_pending = t4["pending_tool"] == "generate_synthetic_trend"
+    trend_executed = any(name == "generate_synthetic_trend" for name, _ in t4["tool_results"])
+
+    if not (trend_call or trend_pending or trend_executed):
+        print(
+            "  FAIL E2E followup: turno 4 respondió SIN emitir tool_call de "
+            f"generate_synthetic_trend. Causa probable: H-B1 (texto plano). "
+            f"ai_text={t4['ai_text'][:120]!r}"
+        )
+        return False
+
+    # El bug del transcript era un error XOR ("periods o end_date, pero no
+    # ambos"): la herencia metía periods aunque el LLM ya hubiera puesto
+    # end_date. Verificamos sobre los args de la tool call de tendencia (o el
+    # pending) que NO conviven ambos miembros del grupo horizon.
+    trend_args = next((a for n, a in t4["tool_calls"] if n == "generate_synthetic_trend"), None)
+    if trend_args is None:
+        trend_args = t4["pending_params"] if trend_pending else {}
+    nonempty = lambda v: v not in (None, "", [])
+    if nonempty(trend_args.get("periods")) and nonempty(trend_args.get("end_date")):
+        print(f"  FAIL E2E followup: la tendencia lleva periods Y end_date (XOR roto): {trend_args}")
+        return False
+
+    print(
+        "  OK E2E followup: turno 4 emitió la tool de tendencia heredando params "
+        "sin romper el XOR."
+    )
+    return True
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
@@ -417,6 +523,167 @@ def _check_message_quality() -> bool:
     return not fail
 
 
+def _check_inheritance_xor() -> bool:
+    """La herencia desde session_facts no debe romper un grupo XOR (oneof_group).
+
+    Determinista, sin LLM. Si el LLM ya fijó ``end_date``, heredar ``periods``
+    de la sesión dejaría ambos miembros del grupo ``horizon`` y la API fallaría
+    con "periods o end_date, pero no ambos".
+    """
+    from src.agent.nodes.reasoning import _inherit_from_session
+
+    print("\n── PARTE 5: herencia respeta XOR (oneof_group) ──")
+    facts = {"by_param": {
+        "start_date": {"value": "2024-01-01"},
+        "frequency": {"value": "D"},
+        "periods": {"value": 365},
+    }}
+    fail = False
+
+    # Caso 1: LLM ya puso end_date → NO heredar periods; sí start_date/frequency.
+    enriched, _ = _inherit_from_session("generate_synthetic_trend", {"end_date": "2024-06-30"}, facts)
+    if "periods" in enriched:
+        print(f"  [FAIL] heredó periods pese a end_date fijado: {enriched}")
+        fail = True
+    elif not (enriched.get("start_date") and enriched.get("frequency")):
+        print(f"  [FAIL] no heredó start_date/frequency: {enriched}")
+        fail = True
+    else:
+        print("  [OK ] end_date fijado → periods no heredado; start_date/frequency sí")
+
+    # Caso 2: sin miembro del grupo fijado → periods se hereda con normalidad.
+    enriched2, _ = _inherit_from_session("generate_synthetic_trend", {}, facts)
+    if enriched2.get("periods") != 365:
+        print(f"  [FAIL] no heredó periods cuando el grupo estaba libre: {enriched2}")
+        fail = True
+    else:
+        print("  [OK ] grupo libre → periods heredado")
+
+    return not fail
+
+
+def _check_followup_detector() -> bool:
+    """El detector de seguimiento heredante cubre las variantes del usuario."""
+    from src.agent.nodes.reasoning import _is_inheriting_followup
+
+    print("\n── PARTE 6: detector de seguimiento heredante ──")
+    facts = {"by_param": {"start_date": {"value": "2024-01-01"}}}
+    positivos = [
+        "Ahora con los parámetros anteriores quiero una con tendencia lineal.",
+        "Ahora generame una con los parametros de tiempo anteriores, PERO CON TENDENCIA LINEAL",
+        "COge los anteriores",
+        "usa los mismos parámetros pero con tendencia",
+    ]
+    fail = False
+    for txt in positivos:
+        if not _is_inheriting_followup(txt, facts):
+            print(f"  [FAIL] no detectó seguimiento: {txt!r}")
+            fail = True
+    # Negativo claro: sin params en sesión no debe disparar aunque mencione "anteriores".
+    if _is_inheriting_followup("los resultados anteriores", {}):
+        print("  [FAIL] disparó sin params heredables en sesión")
+        fail = True
+    if not fail:
+        print(f"  [OK ] {len(positivos)} frases detectadas; negativo sin facts no dispara")
+    return not fail
+
+
+def _check_tool_error_surfaced() -> bool:
+    """Un error de tool ({"error": …}) debe enrutar a gestionar_error, no fingir éxito.
+
+    Determinista, sin LLM ni API: mockeamos la ejecución de la tool para que
+    devuelva un ToolMessage de error y comprobamos que tool_execution_node setea
+    ``error_info`` (y NO actualiza session_facts), y que route_after_tool desvía
+    a "gestionar_error".
+    """
+    from langchain_core.messages import AIMessage, ToolMessage
+    from src.agent.nodes import tool_execution as te
+    from src.agent.nodes.routing import route_after_tool
+
+    print("\n── PARTE 7: error de tool se reporta (no se finge éxito) ──")
+    fail = False
+
+    ai = AIMessage(content="", tool_calls=[{
+        "name": "generate_synthetic_trend", "args": {"trend_type": 3, "trend_params": [0.1]},
+        "id": "call_x", "type": "tool_call",
+    }])
+    err_tm = ToolMessage(
+        content='{"error": "Error de la API (500) en generate_synthetic_trend: list index out of range"}',
+        name="generate_synthetic_trend", tool_call_id="call_x",
+    )
+    state = {"messages": [ai], "session_facts": {"by_param": {"start_date": {"value": "2024-01-01"}}}}
+
+    orig = te._run_tools_sync
+    te._run_tools_sync = lambda _s: {"messages": [err_tm]}
+    try:
+        out = te.tool_execution_node(state)
+    finally:
+        te._run_tools_sync = orig
+
+    if not out.get("error_info"):
+        print(f"  [FAIL] no se seteó error_info en un resultado de error: {out.keys()}")
+        fail = True
+    elif "session_facts" in out:
+        print("  [FAIL] se actualizó session_facts pese al error")
+        fail = True
+    else:
+        print(f"  [OK ] error_info seteado: {out['error_info'][:60]!r}")
+
+    # route_after_tool con error_info → gestionar_error
+    dest = route_after_tool({**state, **out, "messages": state["messages"] + [err_tm]})
+    if dest != "gestionar_error":
+        print(f"  [FAIL] route_after_tool fue a {dest!r}, esperaba 'gestionar_error'")
+        fail = True
+    else:
+        print("  [OK ] route_after_tool → gestionar_error")
+
+    # Caso éxito: limpia error_info/error_count
+    ok_tm = ToolMessage(
+        content='{"output_path": "/tmp/x.csv", "rows_generated": 10, "summary": "ok"}',
+        name="generate_synthetic_trend", tool_call_id="call_x",
+    )
+    te._run_tools_sync = lambda _s: {"messages": [ok_tm]}
+    try:
+        out_ok = te.tool_execution_node({**state, "error_info": "viejo", "error_count": 2})
+    finally:
+        te._run_tools_sync = orig
+    if out_ok.get("error_info") is not None or out_ok.get("error_count") != 0:
+        print(f"  [FAIL] éxito no limpió estado de error: error_info={out_ok.get('error_info')} count={out_ok.get('error_count')}")
+        fail = True
+    else:
+        print("  [OK ] éxito limpia error_info/error_count")
+
+    return not fail
+
+
+def _check_trend_arity() -> bool:
+    """trend_params debe validar su aridad según trend_type (contrato de la API).
+
+    Contrato real: tipos 1/3/4 exigen exactamente 2 coeficientes; el 2 exige ≥1.
+    Sin esta validación la API devolvía un IndexError 500 al recibir 1 coef.
+    """
+    import pydantic
+    from mcp_server.tools.synthetic import GenerateTrendInput
+
+    print("\n── PARTE 8: aridad de trend_params (contrato API) ──")
+    casos = [(3, [0.1], False), (3, [0.1, 0.2], True), (1, [1.0], False),
+             (1, [1.0, 2.0], True), (2, [1.0], True), (2, [1, 2, 3], True), (4, [1.0], False)]
+    fail = False
+    for tt, params, should_ok in casos:
+        try:
+            GenerateTrendInput(start_date="2024-01-01", frequency="D", periods=10,
+                               trend_type=tt, trend_params=params)
+            ok = True
+        except pydantic.ValidationError:
+            ok = False
+        if ok != should_ok:
+            print(f"  [FAIL] tipo={tt} params={params} valid={ok} (esperado {should_ok})")
+            fail = True
+    if not fail:
+        print(f"  [OK ] {len(casos)} casos de aridad validados correctamente")
+    return not fail
+
+
 def main() -> int:
     print("═══ TESTS DEL FIX DE PÉRDIDA DE ARGS ENTRE TURNOS ═══")
 
@@ -432,18 +699,31 @@ def main() -> int:
     print(f"\n  Resumen parte 1: {len(_CASES) - len(fallos)}/{len(_CASES)} tools OK")
 
     quality_ok = _check_message_quality()
+    xor_ok = _check_inheritance_xor()
+    detector_ok = _check_followup_detector()
+    tool_err_ok = _check_tool_error_surfaced()
+    trend_arity_ok = _check_trend_arity()
 
     print("\n── PARTE 4: E2E con LLM real ──")
     e2e_drift_ok = _e2e_drift()
     e2e_synth_ok = _e2e_synthetic()
+    e2e_followup_ok = _e2e_synthetic_followup()
 
     print("\n═══ RESUMEN GLOBAL ═══")
     print(f"  Mockeados      : {len(_CASES) - len(fallos)}/{len(_CASES)}")
     print(f"  Calidad mensaje: {'OK' if quality_ok else 'FAIL'}")
+    print(f"  Herencia XOR   : {'OK' if xor_ok else 'FAIL'}")
+    print(f"  Detector follow: {'OK' if detector_ok else 'FAIL'}")
+    print(f"  Error de tool  : {'OK' if tool_err_ok else 'FAIL'}")
+    print(f"  Aridad trend   : {'OK' if trend_arity_ok else 'FAIL'}")
     print(f"  E2E drift      : {'OK' if e2e_drift_ok else 'FAIL'}")
     print(f"  E2E synth      : {'OK' if e2e_synth_ok else 'FAIL'}")
+    print(f"  E2E followup   : {'OK' if e2e_followup_ok else 'FAIL'}")
 
-    return 0 if (not fallos and quality_ok and e2e_drift_ok and e2e_synth_ok) else 1
+    return 0 if (
+        not fallos and quality_ok and xor_ok and detector_ok and tool_err_ok
+        and trend_arity_ok and e2e_drift_ok and e2e_synth_ok and e2e_followup_ok
+    ) else 1
 
 
 if __name__ == "__main__":
