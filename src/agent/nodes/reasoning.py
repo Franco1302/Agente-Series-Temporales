@@ -22,7 +22,7 @@ from src.agent.param_families import INHERITABLE_PARAMS
 from src.agent.prompts import ANALYTICAL_TOOL_NAMES, build_system_prompt
 from src.agent.state import AgentState
 from src.agent.tools import AGENT_TOOLS
-from src.config.llm_config import get_llm_with_tools
+from src.config.llm_config import get_llm_with_tools, load_ollama_settings
 from src.observability import emit_llm_call
 
 _MAX_ERRORS = 3
@@ -784,6 +784,23 @@ def _replay_pending_tool_call(state: AgentState) -> dict:
     }
 
 
+def _trim_to_recent_turns(messages: list, max_turns: int) -> list:
+    """Devuelve solo los últimos ``max_turns`` turnos de usuario y sus respuestas.
+
+    Un turno empieza con un HumanMessage y abarca todo lo que viene hasta el
+    siguiente HumanMessage. Conservar el contexto reciente reduce que el LLM
+    cuantizado imite formatos repetidos de turnos antiguos; la memoria de
+    parámetros se preserva igualmente en ``session_facts`` (que NO se trunca).
+    """
+    if max_turns <= 0 or not messages:
+        return list(messages)
+    human_indices = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+    if len(human_indices) <= max_turns:
+        return list(messages)
+    cut = human_indices[-max_turns]
+    return list(messages[cut:])
+
+
 def _build_session_facts_hint(session_facts: dict) -> str:
     """Genera el bloque ``[CONTEXTO DE SESIÓN]`` con los parámetros heredables.
 
@@ -891,7 +908,13 @@ def razonador_node(state: AgentState) -> dict:
     csv_path = state.get("csv_path")
     csv_metadata = state.get("csv_metadata")
 
-    messages = list(state["messages"])
+    # Truncamos el historial a los últimos N turnos del usuario
+    # (CHAT_MAX_CONTEXT_TURNS en .env). El contexto real de la sesión
+    # (parámetros heredables) vive en session_facts y se inyecta más abajo
+    # via [CONTEXTO DE SESIÓN]; el historial solo aporta el detalle de la
+    # conversación reciente.
+    max_turns = load_ollama_settings().max_context_turns
+    messages = _trim_to_recent_turns(state["messages"], max_turns)
 
     # Construimos [CONTEXTO DE SESIÓN] con los parámetros heredables ya
     # establecidos. `build_system_prompt` lo inyecta arriba (entre rol y
