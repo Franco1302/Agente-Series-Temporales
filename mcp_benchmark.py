@@ -182,14 +182,13 @@ TEST_CASES = [
         "nombre": "Forecast SARIMAX con argumentos completos",
         "prompt": (
             "Haz un forecast SARIMAX a 30 pasos sobre el fichero '/tmp/ventas.csv', "
-            "usando 'Indice' como índice y 'valor' como columna objetivo, frecuencia diaria."
+            "usando 'Indice' como índice, frecuencia diaria."
         ),
         "herramienta_esperada": "forecast_time_series",
-        "args_requeridos": ["file_path", "index_column", "target_column", "model", "forecast_steps"],
+        "args_requeridos": ["file_path", "index_column", "model", "forecast_steps"],
         "valores_esperados": {
             "file_path": "/tmp/ventas.csv",
             "index_column": "Indice",
-            "target_column": "valor",
             "model": "sarimax",
             "forecast_steps": 30,
         },

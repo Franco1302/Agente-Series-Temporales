@@ -69,10 +69,15 @@ def _normalize_csv_for_backend(
 
 
 class ForecastTimeSeriesInput(BaseModel):
-    """Esquema de entrada normalizado para la prediccion de series."""
+    """Esquema de entrada normalizado para la prediccion de series.
+
+    No hay `target_column`: el backend SARIMAX (`/Datos/Sarimax`) predice TODAS
+    las columnas numéricas del CSV (itera `for x in df.columns`), no una sola.
+    Pedir una columna objetivo sería un contrato falso —la API la ignoraría—,
+    así que el horizonte se aplica al dataset completo.
+    """
     file_path: str
     index_column: str
-    target_column: str
     model: Literal["sarimax"] = "sarimax"
     forecast_steps: int
     frequency: Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"] = "D"
@@ -97,13 +102,6 @@ async def forecast_time_series(
         str,
         Field(
             description="Columna índice del CSV.",
-            json_schema_extra={"evidence": "existing_column"},
-        ),
-    ],
-    target_column: Annotated[
-        str,
-        Field(
-            description="Columna a predecir.",
             json_schema_extra={"evidence": "existing_column"},
         ),
     ],
@@ -137,6 +135,10 @@ async def forecast_time_series(
     USA cuando el usuario quiera estimar el comportamiento futuro de una serie,
     comparar modelos predictivos o evaluar el error de un modelo concreto.
 
+    El modelo SARIMAX predice TODAS las columnas numéricas del CSV (no una
+    columna objetivo concreta): el CSV de salida contiene el histórico más el
+    horizonte predicho para cada una.
+
     Flujo MCP:
     1) Normaliza la entrada con Pydantic.
     2) Selecciona endpoints /Datos y /Error segun el modelo.
@@ -149,8 +151,7 @@ async def forecast_time_series(
     init_mcp_http_log()
     try:
         inp = ForecastTimeSeriesInput(
-            file_path=file_path, index_column=index_column,
-            target_column=target_column, model=model,
+            file_path=file_path, index_column=index_column, model=model,
             forecast_steps=forecast_steps, frequency=frequency,
             return_metrics=return_metrics, with_plot=with_plot,
         )
@@ -169,7 +170,7 @@ async def forecast_time_series(
 
         out_name = deterministic_filename(
             f"forecast_{inp.model}",
-            Path(inp.file_path).stem, inp.index_column, inp.target_column,
+            Path(inp.file_path).stem, inp.index_column,
             str(inp.forecast_steps), inp.frequency,
             ext="csv",
         )
@@ -220,7 +221,7 @@ async def forecast_time_series(
             "image_path": str(png_path) if png_path else None,
             "summary": (
                 f"Predicción de {inp.forecast_steps} pasos generada con {inp.model} "
-                f"para columna '{inp.target_column}'."
+                f"para todas las columnas de la serie."
             ),
         }
         return attach_observability(result)

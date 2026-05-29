@@ -172,6 +172,53 @@ def load_observability_settings() -> ObservabilitySettings:
     return ObservabilitySettings(enabled=enabled, log_level=log_level)
 
 
+def thin_tool_schemas(tools: list, thin_names: set[str] | frozenset[str]) -> list:
+    """Devuelve la lista de tools con el schema "adelgazado" para las indicadas.
+
+    El tool-calling de Ollama necesita enviar el schema de cada herramienta para
+    que el modelo pueda *seleccionarla* y emitir un ``tool_call`` estructurado;
+    no se puede ocultar del todo. Pero sí podemos quitarle la información que le
+    permitiría *rellenar* los parámetros (descripciones, enums, defaults) y
+    marcar todos como opcionales. Así el modelo elige la herramienta pero los
+    parámetros se recogen y validan en ``solicitar_parametros_node`` a partir
+    del schema REAL (que permanece intacto en ``mcp_server/tools/``).
+
+    Para las tools cuyo nombre está en ``thin_names`` se conserva solo el nombre,
+    la descripción de la herramienta (señal de selección) y los nombres+tipos de
+    sus parámetros, sin ``description``/``enum``/``default`` por parámetro y con
+    ``required: []``. El resto de tools (p. ej. ``consultar_teoria``, cuyo
+    ``query`` el LLM reformula legítimamente) se pasan sin tocar.
+
+    Args:
+        tools: Herramientas LangChain (objetos ``BaseTool``).
+        thin_names: Nombres de las tools cuyo schema debe adelgazarse.
+
+    Returns:
+        Lista mixta de schemas OpenAI (dicts) para las adelgazadas y objetos
+        tool originales para el resto, lista para ``bind_tools``.
+    """
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    out: list = []
+    for tool in tools:
+        if getattr(tool, "name", None) not in thin_names:
+            out.append(tool)
+            continue
+        schema = convert_to_openai_tool(tool)
+        params = schema.get("function", {}).get("parameters", {})
+        props = params.get("properties", {})
+        thin_props: dict[str, dict] = {}
+        for pname, pinfo in props.items():
+            # Conservamos solo el tipo (si el schema lo expresa directamente);
+            # descartamos description, enum, default y demás pistas de relleno.
+            ptype = pinfo.get("type") if isinstance(pinfo, dict) else None
+            thin_props[pname] = {"type": ptype} if ptype else {}
+        params["properties"] = thin_props
+        params["required"] = []
+        out.append(schema)
+    return out
+
+
 def get_llm_with_tools(tools: list, tool_choice: Any = None) -> Any:
     """Devuelve un ChatOllama con las herramientas enlazadas para Tool Calling.
 

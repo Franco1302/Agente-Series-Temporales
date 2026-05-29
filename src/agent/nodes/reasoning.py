@@ -25,7 +25,7 @@ from src.agent.prompts import ANALYTICAL_TOOL_NAMES, build_system_prompt
 from src.agent.state import AgentState
 from src.agent.tool_metadata import MUST_CITE_FIELDS
 from src.agent.tools import AGENT_TOOLS
-from src.config.llm_config import get_llm_with_tools, load_ollama_settings
+from src.config.llm_config import get_llm_with_tools, load_ollama_settings, thin_tool_schemas
 from src.observability import emit_llm_call
 
 _MAX_ERRORS = 3
@@ -428,6 +428,90 @@ def _build_followup_directive(session_facts: dict) -> SystemMessage:
         "tool call con lo que tengas y el sistema lo pedirá."
     )
     return SystemMessage(content=body)
+
+
+# ── Petición de acción analítica que el modelo debe resolver con tool call ───
+#
+# El modelo local a veces responde en PROSA pidiendo parámetros cuando debería
+# emitir la tool call y dejar que `solicitar_parametros_node` los recoja de forma
+# estructurada (con sus opciones). Pasa sobre todo con peticiones vagas de
+# generación ("genérame una serie sintética"): el modelo trata el tipo como algo
+# que debe saber antes de llamar. Cuando detectamos una petición de acción clara
+# y el modelo NO emitió tool call, reintentamos UNA vez forzando la llamada con
+# contexto compacto + una directiva (mismo patrón que el seguimiento heredante).
+# `tool_choice="any"` solo no basta con este modelo: la directiva es lo que de
+# verdad lo empuja a emitir el JSON.
+_ACTION_INTENT_KEYWORDS: tuple[str, ...] = (
+    "sint[eé]tic", "serie aleatoria", "datos aleatorios", "simula",
+    "genera", "gener[aá]", "crea", "cr[eé]a",
+    "drift", "deriva", "ha cambiado", "estabilidad",
+    "aument", "ampliar", "m[aá]s observaciones", "m[aá]s datos",
+    "forecast", "predic", "predec", "pron[oó]stic", "sarimax", "futuro",
+    "detecta", "ex[oó]gena", "pca", "correlaci",
+)
+
+# Marcadores de pregunta teórica o de capacidades: si aparecen, NO forzamos
+# (la teoría la enruta consultar_teoria por el flujo normal; las preguntas de
+# capacidades y los saludos se responden en texto plano).
+_NON_ACTION_MARKERS: tuple[str, ...] = (
+    "qu[eé] es", "qu[eé] son", "qu[eé] significa", "explica", "expl[ií]ca",
+    "diferencia", "c[oó]mo funciona", "para qu[eé] sirve", "concepto",
+    "definici[oó]n", "qu[eé] puedes", "qu[eé] sabes", "ay[uú]dame", "ayuda",
+)
+
+
+def _looks_like_action_request(text: str) -> bool:
+    """True si el mensaje es una petición de acción analítica clara.
+
+    Positivo si menciona alguna intención de acción (generar, detectar,
+    aumentar, predecir, crear variable…) y NO es una pregunta teórica ni de
+    capacidades. Gate del reintento que fuerza la tool call.
+    """
+    if not text:
+        return False
+    if _has_any_keyword(text, _NON_ACTION_MARKERS):
+        return False
+    return _has_any_keyword(text, _ACTION_INTENT_KEYWORDS)
+
+
+# Marcadores de generación que NO necesita fichero (las 4 generate_synthetic_*).
+# Si no hay CSV cargado solo forzamos la tool call para estas: forzar una tool
+# que requiere file_path sin CSV haría que el nodo pidiese "file_path" por texto,
+# cuando el fichero se sube por el panel lateral (no se teclea la ruta).
+_NO_FILE_GENERATION_MARKERS: tuple[str, ...] = (
+    "sint[eé]tic", "serie aleatoria", "datos aleatorios", "simula",
+)
+
+
+def _should_force_action(text: str, csv_loaded: bool) -> bool:
+    """True si debemos reintentar forzando la tool call para esta petición.
+
+    Requiere intención de acción y, si no hay CSV, que sea una generación
+    sintética (que no necesita fichero).
+    """
+    if not _looks_like_action_request(text):
+        return False
+    return bool(csv_loaded) or _has_any_keyword(text, _NO_FILE_GENERATION_MARKERS)
+
+
+def _build_action_directive() -> SystemMessage:
+    """Directiva que fuerza la tool call ante una petición de acción en prosa.
+
+    No construye la tool call por código: empuja al LLM a emitir el JSON ya, con
+    los parámetros explícitos que tenga (o ``arguments={}``), en vez de preguntar
+    en texto. Para 'serie/datos sintéticos' sin concretar, sugiere la opción por
+    defecto (generate_synthetic_distribution) para resolver la ambigüedad de tool.
+    """
+    return SystemMessage(content=(
+        "El usuario pide una operación analítica. DEBES emitir AHORA el JSON de la "
+        "tool call de la herramienta más adecuada a su petición (p. ej. un "
+        "'forecast' → forecast_time_series; una 'serie' o 'datos sintéticos' sin "
+        "concretar el tipo → generate_synthetic_distribution). Si hay FICHERO "
+        "ACTIVO, usa su ruta como file_path. Pasa SOLO los parámetros que el "
+        "usuario haya escrito explícitamente; si faltan, emite igualmente la tool "
+        "call con lo que tengas (arguments={} si no hay ninguno) y el sistema "
+        "pedirá el resto. NO preguntes parámetros en texto."
+    ))
 
 
 # Mapas de palabras-clave para los enums semánticos (el LLM hace traducción
@@ -1004,11 +1088,44 @@ def razonador_node(state: AgentState) -> dict:
     else:
         tools_for_bind = AGENT_TOOLS
 
-    llm = get_llm_with_tools(tools_for_bind, tool_choice="any" if force_tool_call else None)
+    # Schema fino: el modelo ve nombre + descripción de cada herramienta analítica
+    # (suficiente para SELECCIONARLA) pero no las descripciones/enums/defaults de
+    # sus parámetros ni cuáles son obligatorios. Así no puede "rellenar" args y la
+    # recogida se centraliza en solicitar_parametros_node, que lee el schema REAL.
+    # consultar_teoria se exime (su `query` la reformula el LLM legítimamente).
+    bind_payload = thin_tool_schemas(tools_for_bind, ANALYTICAL_TOOL_NAMES)
+    llm = get_llm_with_tools(bind_payload, tool_choice="any" if force_tool_call else None)
     t0 = time.perf_counter()
     raw_response = llm.invoke(messages)
     duration_ms = (time.perf_counter() - t0) * 1000.0
     response = _coerce_text_toolcall(raw_response)
+
+    # Red de seguridad: si el modelo respondió en PROSA a una petición de acción
+    # clara (y no estamos sintetizando tras una tool ni en mitad de una recogida
+    # de parámetros), reintentamos UNA vez forzando la tool call con contexto
+    # compacto + directiva. Así la petición de parámetros se centraliza en el
+    # nodo (estructurada, con opciones) en vez de salir como prosa improvisada.
+    if (
+        not getattr(response, "tool_calls", None)
+        and not last_tool
+        and not pending_tool_state
+        and _should_force_action(last_human_text, bool(csv_path))
+    ):
+        forced_llm = get_llm_with_tools(bind_payload, tool_choice="any")
+        compact = [messages[0], HumanMessage(content=last_human_text), _build_action_directive()]
+        t_force = time.perf_counter()
+        forced_raw = forced_llm.invoke(compact)
+        forced = _coerce_text_toolcall(forced_raw)
+        emit_llm_call(
+            name="razonador.force_action_retry",
+            messages=compact,
+            response_raw=forced_raw,
+            response_final=forced,
+            duration_ms=(time.perf_counter() - t_force) * 1000.0,
+        )
+        if getattr(forced, "tool_calls", None):
+            response = forced
+
     # Anti-invención (RULE_NO_INVENT defensiva): retira args sin respaldo en el
     # historial del usuario (fechas, frecuencias, métodos, listas numéricas,
     # nombres de columna, etc.). Debe ir ANTES del merge: si pending_params

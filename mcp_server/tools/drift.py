@@ -51,17 +51,24 @@ class DetectDriftInput(BaseModel):
 
 def _build_query_params(inp: DetectDriftInput) -> dict:
     """Traduce el schema Pydantic a los query params específicos del endpoint."""
-    params: dict[str, object] = {"indice": inp.index_column, "inicio": inp.inicio}
+    # `inicio` solo lo declaran los endpoints univariantes/secuenciales
+    # (/Deteccion/{KS,JS,PSI,CUSUM}). MEWMA y HOTELLING no lo aceptan, así que
+    # no lo añadimos en esa rama para no enviar un query param muerto.
+    params: dict[str, object] = {"indice": inp.index_column}
     threshold = inp.threshold if inp.threshold is not None else _DEFAULT_THRESHOLDS.get(inp.method)
 
     if inp.method == "KS":
+        params["inicio"] = inp.inicio
         params["threshold_ks"] = threshold
     elif inp.method == "JS":
+        params["inicio"] = inp.inicio
         params["threshold_js"] = threshold
     elif inp.method == "PSI":
+        params["inicio"] = inp.inicio
         params["threshold_psi"] = threshold
         params["num_bins"] = inp.num_bins
     elif inp.method == "CUSUM":
+        params["inicio"] = inp.inicio
         params["threshold_cusum"] = threshold
         params["drift_cusum"] = inp.drift_cusum
     elif inp.method in {"MEWMA", "HOTELLING"}:

@@ -4,8 +4,6 @@ Aquí vive SOLO lo que es estrategia de prompting/UX de *este* agente y que NO
 puede derivarse del schema MCP (la fuente de verdad del contrato de las tools):
 
   * ``TOOL_TRIGGERS``            — frases que orientan al LLM a elegir la tool.
-  * ``TOOL_EXTRAS``             — notas/enumeraciones extra para el prompt.
-  * ``REQUIRED_PARAM_WITH_ENUM`` — qué parámetro requerido muestra su enum inline.
   * ``MUST_CITE_FIELDS``        — campos de SALIDA que deben citarse en la
     respuesta (no están en el schema de entrada).
   * ``TOOL_ORDER``             — orden visual de las tools en el prompt.
@@ -56,22 +54,6 @@ TOOL_TRIGGERS: dict[str, str] = {
     "augment_time_series": '"aumentar datos", "más observaciones", "ampliar dataset"',
     "create_exogenous_variable": '"variable exógena", "nueva columna", "PCA", "correlación"',
     "forecast_time_series": '"predecir", "forecast", "futuro", "SARIMAX"',
-}
-
-# Notas opcionales que NO viven en el schema (enumeraciones extra, etc.).
-TOOL_EXTRAS: dict[str, str] = {
-    "generate_synthetic_distribution": "Distribuciones: Normal, Poisson, Beta, Gamma, Uniforme, etc. (códigos 1-17).",
-    "generate_synthetic_arma": "Opcionales: ar_coefficients, ma_coefficients.",
-    "detect_drift": "Univariantes: KS, JS, PSI, CUSUM. Multivariantes: MEWMA, HOTELLING.",
-    "forecast_time_series": "Modelo: SARIMAX.",
-}
-
-# Por tool, el parámetro requerido cuyo enum queremos mostrar inline en la línea
-# "Requiere:" para que el LLM sepa de antemano los valores válidos.
-REQUIRED_PARAM_WITH_ENUM: dict[str, str] = {
-    "detect_drift": "method",
-    "augment_time_series": "strategy",
-    "create_exogenous_variable": "relation",
 }
 
 # Campos deterministas (string/entero) de SALIDA que deben citarse literalmente

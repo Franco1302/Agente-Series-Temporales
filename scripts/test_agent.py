@@ -212,15 +212,13 @@ def _casos() -> list[TestCase]:
             nombre="Forecast SARIMAX sobre la serie",
             mensaje=(
                 f"Haz un forecast SARIMAX a 30 pasos sobre el fichero '{csv_path}' "
-                f"usando 'Indice' como indice y 'valor' como columna objetivo, "
-                f"con frecuencia diaria."
+                f"usando 'Indice' como indice, con frecuencia diaria."
             ),
             csv_path=csv_path,
             tool_esperada="forecast_time_series",
             args_esperados={
                 "file_path": csv_path,
                 "index_column": "Indice",
-                "target_column": "valor",
                 "model": "sarimax",
                 "forecast_steps": 30,
             },

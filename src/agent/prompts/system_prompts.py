@@ -21,8 +21,6 @@ from dataclasses import dataclass
 
 from src.agent.tool_metadata import (
     ANALYTICAL_TOOL_NAMES,
-    REQUIRED_PARAM_WITH_ENUM,
-    TOOL_EXTRAS,
     TOOL_ORDER,
     TOOL_TRIGGERS,
 )
@@ -133,53 +131,28 @@ _BEHAVIOR_FALLBACK = """\
 def _build_tools_1_to_8() -> str:
     """Genera la sección "1.…8." del bloque HERRAMIENTAS desde la metadata MCP.
 
-    Para cada tool en `TOOL_ORDER` lee del schema:
-      * `tool.description` (primer párrafo del docstring) como texto principal.
-      * lista de parámetros requeridos (auto-derivada del schema).
-      * `enum` del parámetro principal (method/strategy/relation) cuando aplica.
-      * grupos XOR de `TOOL_ALTERNATIVE_GROUPS` para la nota "Pasa X O Y".
+    Deliberadamente NO lista los parámetros de cada herramienta (ni requeridos,
+    ni enums, ni grupos XOR, ni notas extra): el agente usa "schema fino"
+    (``llm_config.thin_tool_schemas``), de modo que el modelo solo necesita lo
+    justo para SELECCIONAR la herramienta —nombre, descripción y triggers—. La
+    recogida y validación de parámetros la centraliza ``solicitar_parametros_node``
+    leyendo el schema real. Mostrar aquí los parámetros tentaría al modelo a
+    "rellenarlos" e iría contra ese diseño.
 
-    Combina lo anterior con `TOOL_TRIGGERS` (hand-coded) y `TOOL_EXTRAS`
-    (hand-coded). El resultado es byte-distinto del literal anterior, por lo
-    que los snapshots de prompt deben regenerarse.
+    Para cada tool en ``TOOL_ORDER`` toma ``tool.description`` (primer párrafo del
+    docstring) y los ``TOOL_TRIGGERS`` (hand-coded).
     """
     # Import dentro de la función para evitar ciclos al cargar el módulo.
-    from src.agent.nodes.param_request import (
-        TOOL_ALTERNATIVE_GROUPS,
-        TOOL_REQUIRED_PARAMS,
-        get_param_enum,
-        get_tool_description,
-    )
+    from src.agent.nodes.param_request import get_tool_description
 
     entries: list[str] = []
     for idx, name in enumerate(TOOL_ORDER, start=1):
         desc = get_tool_description(name)
         triggers = TOOL_TRIGGERS.get(name, "")
-
-        enum_param = REQUIRED_PARAM_WITH_ENUM.get(name)
-        required: list[str] = []
-        for p in TOOL_REQUIRED_PARAMS.get(name, []):
-            if p == enum_param:
-                values = get_param_enum(name, p)
-                if values:
-                    required.append(f"{p} ∈ {{{', '.join(values)}}}")
-                    continue
-            required.append(p)
-        required_str = ", ".join(required)
-
-        xor_note = ""
-        for group in TOOL_ALTERNATIVE_GROUPS.get(name, []):
-            xor_note = f" Pasa {' O '.join(group)}, no ambos."
-
-        entry_lines = [
+        entries.append("\n".join([
             f"{idx}. {name} — {desc}",
             f"   Triggers: {triggers}.",
-            f"   Requiere: {required_str}.{xor_note}",
-        ]
-        extras = TOOL_EXTRAS.get(name)
-        if extras:
-            entry_lines.append(f"   {extras}")
-        entries.append("\n".join(entry_lines))
+        ]))
 
     return "\n\n".join(entries)
 

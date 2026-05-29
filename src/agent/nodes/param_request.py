@@ -313,6 +313,21 @@ def get_missing_tunable_params(tool_name: str, provided_args: dict) -> list[str]
     ]
 
 
+def _describe_param_with_options(tool_name: str, param: str) -> str:
+    """Descripción del parámetro + sus opciones válidas (enum) si las tiene.
+
+    Como el system prompt ya no lista los parámetros de cada herramienta
+    (el agente usa schema fino), este nodo es el único punto donde el usuario
+    ve los valores admitidos. Si el parámetro es un enum (``Literal[...]``),
+    los añadimos para que la pregunta sea autosuficiente.
+    """
+    desc = get_param_description(tool_name, param)
+    enum = get_param_enum(tool_name, param)
+    if enum:
+        return f"{desc} (opciones: {', '.join(enum)})"
+    return desc
+
+
 def _format_required_message(
     tool_name: str,
     missing: list[str],
@@ -322,10 +337,10 @@ def _format_required_message(
         "Para continuar necesito algunos datos adicionales. Por favor, proporciona:"
     ]
     for param in missing:
-        lines.append(f"  • **{param}**: {get_param_description(tool_name, param)}")
+        lines.append(f"  • **{param}**: {_describe_param_with_options(tool_name, param)}")
     for group in missing_groups or []:
         alternativas = " **o** ".join(
-            f"**{p}** ({get_param_description(tool_name, p)})" for p in group
+            f"**{p}** ({_describe_param_with_options(tool_name, p)})" for p in group
         )
         lines.append(f"  • Uno de: {alternativas}")
     return "\n".join(lines)

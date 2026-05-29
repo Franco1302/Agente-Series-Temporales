@@ -206,6 +206,27 @@ async def test_generate_distribution_exclusion_error():
     assert "periods" in out["error"] and "end_date" in out["error"]
 
 
+@pytest.mark.asyncio
+async def test_generate_distribution_bad_arity_error():
+    """F2: Normal (tipo 1) exige 2 params; con 1 devuelve error accionable, no un 500."""
+    out = await generate_synthetic_distribution(
+        start_date="2024-01-01", periods=10, frequency="D",
+        distribution_type=1, distribution_params=[0.0],
+    )
+    assert "error" in out
+    assert "distribution_params" in out["error"]
+
+
+@pytest.mark.asyncio
+async def test_generate_distribution_uncurated_code_rejected():
+    """F3: un código no curado (8=lognormal) se rechaza por el schema (Literal)."""
+    out = await generate_synthetic_distribution(
+        start_date="2024-01-01", periods=10, frequency="D",
+        distribution_type=8, distribution_params=[1.0],
+    )
+    assert "error" in out
+
+
 # ─────────────────────────── synthetic ARMA / periodic / trend ───────────────────────────
 
 @respx.mock(base_url="http://testserver")
@@ -356,7 +377,7 @@ async def test_forecast_with_metrics(respx_mock, sample_csv):
         return_value=httpx.Response(200, json={"MAE": 0.1, "RMSE": 0.15, "MAPE": 0.05})
     )
     out = await forecast_time_series(
-        file_path=str(sample_csv), index_column="ts", target_column="valor",
+        file_path=str(sample_csv), index_column="ts",
         model="sarimax", forecast_steps=5, return_metrics=True,
     )
     assert "output_path" in out
@@ -371,7 +392,7 @@ async def test_forecast_no_metrics(respx_mock, sample_csv):
         return_value=httpx.Response(200, content=b"ts,p\n2024-01-21,1.0\n")
     )
     out = await forecast_time_series(
-        file_path=str(sample_csv), index_column="ts", target_column="valor",
+        file_path=str(sample_csv), index_column="ts",
         model="sarimax", forecast_steps=5, return_metrics=False, with_plot=False,
     )
     assert "output_path" in out

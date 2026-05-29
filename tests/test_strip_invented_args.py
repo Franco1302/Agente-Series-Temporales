@@ -264,11 +264,14 @@ def test_keep_index_column_when_user_mentions_it_textually():
     assert _args_of(cleaned)["index_column"] == "ts"
 
 
-def test_keep_target_column_from_csv_metadata():
-    msg = _tool_call_msg("forecast_time_series", {"target_column": "valor"})
+def test_keep_index_column_from_csv_metadata():
+    # forecast ya no tiene target_column (SARIMAX predice todas las columnas);
+    # index_column lleva el mismo `evidence="existing_column"`, así que cubrimos
+    # el fallback contra csv_metadata con un parámetro real de la tool.
+    msg = _tool_call_msg("forecast_time_series", {"index_column": "Indice"})
     state = _state("Predice.", csv_metadata={"columns": ["Indice", "valor"]})
     cleaned = _strip_invented_args(msg, state)
-    assert _args_of(cleaned)["target_column"] == "valor"
+    assert _args_of(cleaned)["index_column"] == "Indice"
 
 
 def test_strip_new_column_when_user_did_not_name_it():
@@ -488,7 +491,7 @@ def test_delegation_directive_injected_when_pending_and_missing():
                 }],
             )
 
-    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools: _FakeLLM()):
+    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None: _FakeLLM()):
         updates = reasoning_mod.razonador_node(state)
 
     # La directiva DEBE estar entre los mensajes que recibió el LLM.
@@ -525,7 +528,7 @@ def test_delegation_directive_injected_when_no_pending_tool():
             captured.append(list(messages))
             return AIMessage(content="OK")
 
-    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools: _FakeLLM()):
+    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None: _FakeLLM()):
         reasoning_mod.razonador_node(state)
 
     from langchain_core.messages import SystemMessage
@@ -555,7 +558,7 @@ def test_delegation_directive_not_injected_without_delegation():
             captured.append(list(messages))
             return AIMessage(content="OK")
 
-    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools: _FakeLLM()):
+    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None: _FakeLLM()):
         reasoning_mod.razonador_node(state)
 
     from langchain_core.messages import SystemMessage
@@ -599,7 +602,7 @@ def test_razonador_node_routes_to_pending_when_llm_invents_args():
         def invoke(self, _messages):
             return inventive
 
-    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools: _FakeLLM()):
+    with patch.object(reasoning_mod, "get_llm_with_tools", lambda _tools, tool_choice=None: _FakeLLM()):
         updates = reasoning_mod.razonador_node(state)
 
     assert updates["pending_tool"] == "generate_synthetic_distribution"

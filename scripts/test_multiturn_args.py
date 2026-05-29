@@ -112,7 +112,6 @@ _CASES: list[ForgetfulCase] = [
         already_collected={
             "file_path": "data/temp_uploads/ARMA-DIST-fin.csv",
             "index_column": "Indice",
-            "target_column": "valor",
         },
         llm_emits_only={"forecast_steps": 30},
     ),

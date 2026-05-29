@@ -18,6 +18,61 @@ _SETTINGS = load_settings()
 
 _FREQ = Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"]
 
+# Subconjunto CURADO de distribuciones que el agente expone. La API soporta
+# códigos 1..17, pero la capa MCP es un facade acotado: solo ofrecemos los que
+# documentamos. Restringir el tipo (en vez de `int` con `ge/le`) cierra el
+# contrato —lo aceptado == lo documentado— e impide colar las distribuciones no
+# curadas (5 hipergeométrica, 6 constante, 8 lognormal, 14 Pareto, 15/16 rampas).
+_DISTR = Literal[1, 2, 3, 4, 7, 9, 10, 11, 12, 13, 17]
+
+# Nº de parámetros que la API acepta en `params` por código de distribución
+# (contrato real, drift-detection/api/series_sinteticas/funciones_generales.py,
+# función `distribuciones`). Sin esta validación, pasar una aridad incorrecta
+# (p. ej. 1 solo valor a una Normal, que indexa params[0] y params[1]) provoca
+# un IndexError → 500 opaco en la API en vez de un mensaje accionable. Espejo de
+# `_TREND_PARAM_ARITY`.
+_DISTRIBUTION_PARAM_ARITY: dict[int, tuple[int, int]] = {
+    1: (2, 2),   # Normal[mu, sigma]
+    2: (2, 3),   # Binomial[n, p, (loc)]
+    3: (1, 2),   # Poisson[lambda, (loc)]
+    4: (1, 2),   # Geométrica[p, (loc)]
+    7: (0, 2),   # Uniforme[(low), (scale)]
+    9: (0, 2),   # Exponencial[(loc), (scale)]
+    10: (1, 3),  # Gamma[a, (loc), (scale)]
+    11: (2, 4),  # Beta[a, b, (loc), (scale)]
+    12: (1, 3),  # ChiCuadrado[df, (loc), (scale)]
+    13: (1, 3),  # t-Student[df, (loc), (scale)]
+    17: (2, 2),  # Aleatorio[low, high]
+}
+_DISTRIBUTION_TYPE_NAMES: dict[int, str] = {
+    1: "Normal", 2: "Binomial", 3: "Poisson", 4: "Geométrica", 7: "Uniforme",
+    9: "Exponencial", 10: "Gamma", 11: "Beta", 12: "ChiCuadrado",
+    13: "t-Student", 17: "Aleatorio",
+}
+
+
+def _check_distribution_arity(distribution_type: int, params: list[float]) -> None:
+    """Valida la aridad de `params` para una distribución; lanza ValueError si no encaja.
+
+    No-op si el tipo no está en el mapa (deja que la API lo rechace). Se usa
+    desde los `model_validator` de los schemas que llevan una distribución base
+    (distribución pura y periódica).
+    """
+    bounds = _DISTRIBUTION_PARAM_ARITY.get(distribution_type)
+    if bounds is None:
+        return
+    lo, hi = bounds
+    n = len(params)
+    if lo <= n <= hi:
+        return
+    nombre = _DISTRIBUTION_TYPE_NAMES.get(distribution_type, str(distribution_type))
+    esperado = f"exactamente {lo}" if lo == hi else f"entre {lo} y {hi}"
+    raise ValueError(
+        f"La distribución {nombre} (tipo {distribution_type}) requiere {esperado} "
+        f"parámetro(s) en distribution_params, pero se recibieron {n}: {params}. "
+        f"Indica los parámetros correctos (p. ej. Normal → [media, desviación])."
+    )
+
 
 def _resolve_horizon(end_date: Optional[str], periods: Optional[int]) -> tuple[str, dict]:
     """Resuelve el horizonte para el endpoint y valida la exclusividad.
@@ -104,10 +159,15 @@ class GenerateDistributionInput(BaseModel):
     end_date: Optional[str] = None
     periods: Optional[int] = None
     frequency: _FREQ
-    distribution_type: int
+    distribution_type: _DISTR
     distribution_params: list[float]
     column_name: str = "valor"
     with_plot: bool = True
+
+    @model_validator(mode="after")
+    def _check_params_arity(self) -> "GenerateDistributionInput":
+        _check_distribution_arity(self.distribution_type, self.distribution_params)
+        return self
 
 
 class GenerateArmaInput(BaseModel):
@@ -132,11 +192,16 @@ class GeneratePeriodicInput(BaseModel):
     periods: Optional[int] = None
     frequency: _FREQ
     column_name: str = "valor"
-    distribution_type: int
+    distribution_type: _DISTR
     distribution_params: list[float]
     period_length: int
     pattern_type: Literal[1, 2]
     with_plot: bool = True
+
+    @model_validator(mode="after")
+    def _check_params_arity(self) -> "GeneratePeriodicInput":
+        _check_distribution_arity(self.distribution_type, self.distribution_params)
+        return self
 
 
 # Nº de coeficientes que la API exige en `trend_params` según `trend_type`.
@@ -203,9 +268,8 @@ async def generate_synthetic_distribution(
         ),
     ],
     distribution_type: Annotated[
-        int,
+        _DISTR,
         Field(
-            ge=1, le=17,
             description=(
                 "1=Normal[mu,sigma], 2=Binomial[n,p], 3=Poisson[lambda], 4=Geometrica[p], "
                 "7=Uniforme[low,high], 9=Exponencial[scale], 10=Gamma[a], 11=Beta[a,b], "
@@ -445,9 +509,8 @@ async def generate_synthetic_periodic(
         Field(description="Frecuencia temporal.", json_schema_extra={"evidence": "freq"}),
     ],
     distribution_type: Annotated[
-        int,
+        _DISTR,
         Field(
-            ge=1, le=17,
             description="Distribución base (ver generate_synthetic_distribution).",
             json_schema_extra={"evidence": "distribution_kind"},
         ),

@@ -28,9 +28,9 @@ PARAM_FAMILIES: dict[str, frozenset[str]] = {
     # Origen de los datos: ruta al CSV activo y columna que actúa como índice
     # temporal. Compartido por drift, forecast, augment y exógenas.
     "data_source": frozenset({"file_path", "index_column"}),
-    # Identidad de la serie generada/objetivo. Solo nombre de la columna de
-    # salida en herramientas sintéticas; intencionalmente NO incluye
-    # ``target_column`` (semántica específica de forecast).
+    # Identidad de la serie generada: nombre de la columna de salida en las
+    # herramientas sintéticas. (forecast no tiene columna objetivo: SARIMAX
+    # predice todas las columnas del CSV.)
     "series_identity": frozenset({"column_name"}),
 }
 

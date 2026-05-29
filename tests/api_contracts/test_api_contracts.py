@@ -189,7 +189,6 @@ async def test_forecast_sarimax_on_periodic(periodic_csv_path: str):
     out = await forecast_time_series(
         file_path=periodic_csv_path,
         index_column="Indice",
-        target_column="valor",
         model="sarimax",
         forecast_steps=forecast_steps,
         frequency="D",

@@ -24,7 +24,7 @@
       "prompt": "Predice el futuro de mi serie temporal.",
       "expected_route": "solicitar_parametros",
       "must_ask": true,
-      "forbidden_invent": ["file_path", "index_column", "target_column", "model", "forecast_steps"]
+      "forbidden_invent": ["file_path", "index_column", "model", "forecast_steps"]
     },
     {
       "id": "MP-04",
@@ -57,7 +57,7 @@
       "prompt": "Quiero modelar mi serie temporal.",
       "expected_route": "solicitar_parametros",
       "must_ask": true,
-      "forbidden_invent": ["file_path", "index_column", "model", "forecast_steps", "target_column"]
+      "forbidden_invent": ["file_path", "index_column", "model", "forecast_steps"]
     },
     {
       "id": "AT-04",
