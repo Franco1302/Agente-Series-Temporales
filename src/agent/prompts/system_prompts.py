@@ -361,6 +361,7 @@ def build_system_prompt(
     csv_metadata: dict | None = None,
     tool_result_to_explain: str | None = None,
     ablation: PromptAblation | None = None,
+    session_context: str | None = None,
 ) -> str:
     """Construye el prompt del sistema adaptado al contexto de la sesión.
 
@@ -376,17 +377,22 @@ def build_system_prompt(
             RULE_THEORY_TOOL, FEWSHOT_EXAMPLES). Si es None, se usa
             ``PromptAblation()`` (todo activado), idéntico al comportamiento
             anterior al refactor.
+        session_context: Bloque ``[CONTEXTO DE SESIÓN]`` ya formateado con los
+            parámetros heredables de la sesión. Si se pasa, se inyecta entre el
+            rol y el comportamiento (donde el LLM lo ve antes de decidir si
+            emite tool_call). ``None`` u ``""`` → no se inyecta, el prompt
+            resultante es byte-exact al de sin contexto (preserva snapshots).
 
     Returns:
         Prompt del sistema completo listo para pasarlo como SystemMessage.
     """
     cfg = ablation or _DEFAULT_ABLATION
 
-    blocks: list[str] = [
-        _ROLE_BLOCK,
-        _build_behavior_block(cfg),
-        _build_tools_block(cfg),
-    ]
+    blocks: list[str] = [_ROLE_BLOCK]
+    if session_context:
+        blocks.append(session_context)
+    blocks.append(_build_behavior_block(cfg))
+    blocks.append(_build_tools_block(cfg))
 
     if tool_result_to_explain in ANALYTICAL_TOOL_NAMES:
         blocks.append(_build_explain_result_block(cfg))

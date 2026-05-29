@@ -7,9 +7,10 @@ import json
 import time
 from typing import Any, Optional
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt import ToolNode
 
+from src.agent.param_families import INHERITABLE_PARAMS
 from src.agent.state import AgentState
 from src.agent.tools import AGENT_TOOLS
 from src.observability.context import get_current_span, get_thread_id, get_trace_id, new_span_id
@@ -182,4 +183,62 @@ def tool_execution_node(state: AgentState) -> dict:
             _emit_http_events(tool_name, http_logs)
             _emit_tool_end(tool_name, tool_call_id, duration_ms, ok, result_kind)
 
+        if ok:
+            executed_args = tool_call.get("args") or {}
+            existing_facts = (state or {}).get("session_facts") or {}
+            turn_idx = _current_turn_index(state)
+            result["session_facts"] = _update_session_facts(
+                existing_facts, tool_name, executed_args, turn_idx
+            )
+
     return result
+
+
+def _current_turn_index(state: AgentState) -> int:
+    """Aproxima el ordinal del turno actual contando HumanMessage en el historial.
+
+    Se usa como metadato informativo en ``session_facts["by_param"]`` para que
+    se pueda saber cuándo se introdujo un parámetro. No interviene en la lógica
+    de herencia: si dos tools establecen el mismo parámetro, gana la última.
+    """
+    messages = (state or {}).get("messages") or []
+    return sum(1 for m in messages if isinstance(m, HumanMessage))
+
+
+def _update_session_facts(
+    existing: dict,
+    tool_name: str,
+    args: dict,
+    turn_idx: int,
+) -> dict:
+    """Actualiza ``session_facts`` con los parámetros de una ejecución exitosa.
+
+    Implementación genérica: no conoce el nombre de ninguna tool. Cualquier
+    herramienta nueva contribuye automáticamente sin tocar este código.
+
+    - ``by_param``: pivota por nombre de parámetro. Registra cada arg que
+      pertenezca a una familia semántica heredable (``INHERITABLE_PARAMS``)
+      junto con su origen (tool, turno). Si una tool posterior fija el mismo
+      parámetro, sobrescribe la entrada — la herencia siempre prefiere el
+      valor más reciente.
+    - ``by_tool``: snapshot completo de la última ejecución de cada tool, sin
+      filtrado de familias. Sirve para auditoría e introspección, no para la
+      pasada de herencia (esa usa ``by_param``).
+
+    Solo se persisten valores no vacíos (``None``, ``""`` y ``[]`` se ignoran).
+    """
+    nonempty = lambda v: v not in (None, "", [])  # noqa: E731
+
+    by_param = dict(existing.get("by_param") or {})
+    for name, value in args.items():
+        if name in INHERITABLE_PARAMS and nonempty(value):
+            by_param[name] = {
+                "value": value,
+                "source_tool": tool_name,
+                "turn": turn_idx,
+            }
+
+    by_tool = dict(existing.get("by_tool") or {})
+    by_tool[tool_name] = {k: v for k, v in args.items() if nonempty(v)}
+
+    return {"by_param": by_param, "by_tool": by_tool}
