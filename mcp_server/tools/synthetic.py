@@ -307,17 +307,7 @@ async def generate_synthetic_distribution(
     USA cuando el usuario quiera crear datos artificiales con una distribucion conocida
     (Normal, Poisson, Uniforme, Beta, Gamma...). NO uses si la serie debe tener
     autocorrelacion (usa generate_synthetic_arma) ni patrones ciclicos
-    (usa generate_synthetic_periodic).
-
-    Flujo MCP:
-    1) Normaliza la entrada con el schema interno.
-    2) Resuelve horizonte (periodos o fin) y compone endpoint.
-    3) Descarga el CSV generado por el backend y lo guarda en el workspace.
-    4) Si `with_plot=True`, descarga el PNG asociado.
-
-    Pasa `periods` O `end_date`, no ambos.
-
-    Devuelve: output_path, rows_generated, image_path, summary.
+    (usa generate_synthetic_periodic). Pasa `periods` O `end_date`, no ambos.
     """
     init_mcp_http_log()
     try:
@@ -423,14 +413,6 @@ async def generate_synthetic_arma(
 
     USA cuando el usuario pida datos con autocorrelacion temporal, AR(p), MA(q),
     ARMA(p,q) o estacionalidad fija. Pasa `periods` O `end_date`, no ambos.
-
-    Flujo MCP:
-    1) Normaliza la entrada y valida el horizonte.
-    2) Compone el endpoint /Datos/ARMA/{periodos|fin}.
-    3) Descarga el CSV generado y lo guarda en el workspace.
-    4) Si `with_plot=True`, descarga el PNG correspondiente.
-
-    Devuelve: output_path, rows_generated, image_path, summary, model_spec.
     """
     init_mcp_http_log()
     try:
@@ -558,16 +540,7 @@ async def generate_synthetic_periodic(
 
     USA cuando el usuario mencione estacionalidad observable (semanal, mensual, anual),
     patrones que se repiten cada N observaciones, o simulacion de demanda con ciclos.
-
-    Flujo MCP:
-    1) Normaliza la entrada y valida el horizonte.
-    2) Compone el endpoint /Datos/periodicos/{periodos|fin}.
-    3) Descarga el CSV generado y lo guarda en el workspace.
-    4) Si `with_plot=True`, descarga el PNG correspondiente.
-
     Pasa `periods` O `end_date`, no ambos.
-
-    Devuelve: output_path, rows_generated, image_path, summary.
     """
     init_mcp_http_log()
     try:
@@ -679,16 +652,7 @@ async def generate_synthetic_trend(
 
     USA cuando el usuario quiera datos con crecimiento o decrecimiento sistematico,
     o simulacion de procesos no estacionarios con tendencia conocida.
-
-    Flujo MCP:
-    1) Normaliza la entrada y valida el horizonte.
-    2) Compone el endpoint /Datos/tendencia/{periodos|fin}.
-    3) Descarga el CSV generado y lo guarda en el workspace.
-    4) Si `with_plot=True`, descarga el PNG correspondiente.
-
     Pasa `periods` O `end_date`, no ambos.
-
-    Devuelve: output_path, rows_generated, image_path, summary.
     """
     init_mcp_http_log()
     try:

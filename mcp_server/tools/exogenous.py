@@ -103,23 +103,8 @@ async def create_exogenous_variable(
 ) -> dict:
     """Añade una nueva columna sintetica al CSV calculada a partir de las existentes.
 
-    Flujo real del MCP para esta herramienta:
-    1) Se valida y normaliza la entrada con Pydantic.
-    2) Se resuelve el endpoint MCP segun la relacion solicitada.
-    3) Se sube el CSV como multipart al backend con los parametros adecuados.
-    4) Se guarda la respuesta (CSV) en el workspace.
-    5) Si `with_plot=True`, se llama a /Plot{endpoint} y se persiste el PNG.
-
-    Usa esta herramienta cuando el usuario quiera enriquecer un dataset con
-    variables derivadas para mejorar el rendimiento de un modelo predictivo
-    (por ejemplo, SARIMAX).
-
-    Devuelve un dict con:
-    - output_path: ruta del CSV generado.
-    - new_column_name: nombre de la columna creada.
-    - relation_used: relacion aplicada.
-    - image_path: ruta del PNG (si se genero).
-    - summary: descripcion breve del resultado.
+    USA cuando el usuario quiera enriquecer un dataset con variables derivadas
+    (exógenas) para mejorar el rendimiento de un modelo predictivo (p. ej. SARIMAX).
     """
     init_mcp_http_log()
     try:

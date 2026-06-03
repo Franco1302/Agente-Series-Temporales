@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import re
 import time
+import unicodedata
 import uuid
+from functools import lru_cache
 from typing import Callable
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -514,6 +516,47 @@ def _build_action_directive() -> SystemMessage:
     ))
 
 
+# ── Pregunta teórica que el agente debe fundamentar con RAG (consultar_teoria) ─
+#
+# El modelo local cuantizado a veces responde una pregunta conceptual ("¿qué es
+# el PSI?") de su conocimiento paramétrico, sin consultar la documentación. Eso
+# rompe el grounding (RF/RNF de citas): la respuesta no es trazable a las fuentes
+# del corpus. Cuando detectamos una pregunta teórica clara y el modelo NO emitió
+# tool call, sintetizamos de forma determinista la llamada a `consultar_teoria`
+# (mismo patrón que `_replay_pending_tool_call`), para garantizar que la síntesis
+# parte del contexto recuperado y cita las fuentes.
+_THEORY_QUESTION_MARKERS: tuple[str, ...] = (
+    "qu[eé] es", "qu[eé] son", "qu[eé] significa", "qu[eé] mide",
+    "explica", "expl[ií]ca", "explicame", "expl[ií]came",
+    "definici[oó]n", "concepto", "en qu[eé] consiste",
+    "diferencia entre", "diferencias entre",
+    "c[oó]mo funciona", "para qu[eé] sirve", "por qu[eé] se usa",
+)
+
+# Si la pregunta referencia los DATOS del usuario (su CSV, columnas, resultados,
+# una gráfica…) NO es teórica: la responde el flujo normal u otras tools, no el
+# RAG sobre la documentación.
+_DATA_REFERENCE_MARKERS: tuple[str, ...] = (
+    "mi csv", "mis datos", "mi fichero", "mi archivo", "mi serie", "mi dataset",
+    "el fichero", "el archivo", "este dataset",
+    "columna", "fila", "sub[ií]", "cargu[eé]",
+    "resultado", "predicci", "gr[aá]fica",
+)
+
+
+def _looks_like_theory_question(text: str) -> bool:
+    """True si el mensaje es una pregunta conceptual sobre teoría (no sobre datos).
+
+    Gate del forzado determinista de `consultar_teoria`: requiere un marcador
+    conceptual y la ausencia de referencias a los datos del usuario.
+    """
+    if not text:
+        return False
+    if _has_any_keyword(text, _DATA_REFERENCE_MARKERS):
+        return False
+    return _has_any_keyword(text, _THEORY_QUESTION_MARKERS)
+
+
 # Mapas de palabras-clave para los enums semánticos (el LLM hace traducción
 # legítima «normal» → 1, «kolmogorov-smirnov» → KS; queremos detectar que
 # el usuario dijo *alguna* palabra relacionada).
@@ -736,6 +779,147 @@ def _strip_invented_args(response: AIMessage, state: dict) -> AIMessage:
             stripped.append(arg_name)
 
     if not stripped:
+        return response
+
+    call_id = (
+        call.get("id") if isinstance(call, dict) else getattr(call, "id", None)
+    ) or f"call_{uuid.uuid4().hex[:12]}"
+    return AIMessage(
+        content=response.content,
+        tool_calls=[{
+            "name": tool_name,
+            "args": args,
+            "id": call_id,
+            "type": "tool_call",
+        }],
+        additional_kwargs=getattr(response, "additional_kwargs", {}) or {},
+    )
+
+
+# ── Resolución determinista de enums "código=nombre" (distribution_type, …) ──
+#
+# Las tools sintéticas codifican el tipo como un entero arbitrario y no
+# contiguo (distribution_type 1=Normal, 2=Binomial…; trend_type 1=lineal…). Con
+# el schema fino el modelo NO ve ese mapa al emitir la tool call y a veces yerra
+# el código (p. ej. "normal" → 2/Binomial). Esta defensa lo corrige: parsea el
+# mapa código→nombre de la PROPIA descripción del schema (fuente de verdad, sin
+# duplicar tablas) y, si el usuario nombró una de las opciones, fija el código
+# canónico. Complementa a _strip_invented_args, que solo comprueba que el usuario
+# nombró ALGUNA distribución, no que el código emitido sea el correcto.
+
+_ENUM_CODE_PATTERN = re.compile(r"(\d+)\s*=\s*([A-Za-zÀ-ÿ]+)")
+
+# Alias de idioma para nombres que la descripción del schema da con un único
+# término canónico (dice "Normal"; el usuario puede decir "gaussiana"). Es
+# metadato lingüístico, no del contrato de la API.
+_ENUM_NAME_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
+    "distribution_type": {
+        "normal": ("gaussian", "gauss", "gaussiana", "gaussiano"),
+        "uniforme": ("uniform",),
+        "exponencial": ("exponential",),
+        "tstudent": ("t-student", "t student", "student"),
+        "chicuadrado": ("chi-cuadrado", "chi cuadrado", "ji cuadrado"),
+        "geometrica": ("geometric",),
+    },
+    "trend_type": {
+        "lineal": ("linear", "recta"),
+        "polinomica": ("polynomial", "polinomial", "polinomio"),
+        "logaritmica": ("logarithmic", "logaritmo"),
+    },
+}
+
+
+def _strip_accents(text: str) -> str:
+    """Minúsculas sin tildes, para casar nombres independientemente de la grafía."""
+    nfd = unicodedata.normalize("NFD", text.lower())
+    return "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+
+
+@lru_cache(maxsize=1)
+def _enum_code_maps() -> dict[str, dict[str, int]]:
+    """``{param: {nombre_sin_tildes: código}}`` derivado de las descripciones del schema.
+
+    Para cada parámetro cuyo ``description`` enumera pares "N=Nombre" (≥2),
+    construye el mapa nombre→código tomando la descripción más rica entre las
+    tools que lo declaran (p. ej. ``distribution_type`` sale de
+    ``generate_synthetic_distribution`` y se reutiliza para la periódica, cuya
+    descripción solo remite a aquella). Añade los alias de ``_ENUM_NAME_ALIASES``.
+    """
+    best: dict[str, dict[str, int]] = {}
+    for tool in AGENT_TOOLS:
+        for param, info in get_field_metadata(tool.name).items():
+            if not isinstance(info, dict):
+                continue
+            pairs = _ENUM_CODE_PATTERN.findall(info.get("description", "") or "")
+            if len(pairs) < 2:
+                continue
+            names = [_strip_accents(name) for _, name in pairs]
+            # Descripciones cuyo primer término por código no es distintivo (p. ej.
+            # pattern_type: "1=variación de amplitud, 2=variación de cantidad", ambos
+            # "variación") no son resolubles por nombre: las descartamos para no
+            # mapear a un código equivocado.
+            if len(set(names)) != len(names):
+                continue
+            mapping = {name: int(code) for name, (code, _) in zip(names, pairs)}
+            if len(mapping) > len(best.get(param, {})):
+                best[param] = mapping
+
+    for param, aliases in _ENUM_NAME_ALIASES.items():
+        mapping = best.get(param)
+        if not mapping:
+            continue
+        for canonical, syns in aliases.items():
+            code = mapping.get(_strip_accents(canonical))
+            if code is None:
+                continue
+            for syn in syns:
+                mapping.setdefault(_strip_accents(syn), code)
+    return best
+
+
+def _match_enum(user_text: str, name_to_code: dict[str, int]) -> int | None:
+    """Código canónico que el usuario nombró, o None si ninguno o es ambiguo.
+
+    Devuelve un código solo si exactamente un valor del enum aparece en el texto;
+    si el usuario menciona dos (o ninguno), no tocamos el arg del modelo.
+    """
+    norm = _strip_accents(user_text)
+    found = {code for name, code in name_to_code.items() if name in norm}
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def _resolve_enum_codes(response: AIMessage, state: AgentState) -> AIMessage:
+    """Corrige/fija los enums código=nombre de la tool call según lo que el usuario nombró.
+
+    Solo actúa sobre parámetros que la tool destino acepta y que tienen un mapa
+    código=nombre en su schema. Si el usuario nombró una opción de forma
+    inequívoca, fija ese código (sobrescribe uno mal mapeado o rellena uno
+    ausente — en ambos casos hay evidencia textual, no es invención).
+    """
+    tool_calls = getattr(response, "tool_calls", None) or []
+    if not tool_calls:
+        return response
+
+    call = tool_calls[0]
+    tool_name = call.get("name", "") if isinstance(call, dict) else getattr(call, "name", "")
+    accepted = _TOOL_ACCEPTED_PARAMS.get(tool_name, frozenset())
+    relevant = {p: m for p, m in _enum_code_maps().items() if p in accepted}
+    if not relevant:
+        return response
+
+    user_text = _aggregate_human_text(state.get("messages", []) if state else [])
+    if not user_text:
+        return response
+
+    args = dict(call.get("args", {}) if isinstance(call, dict) else getattr(call, "args", {}) or {})
+    changed = False
+    for param, name_to_code in relevant.items():
+        resolved = _match_enum(user_text, name_to_code)
+        if resolved is not None and args.get(param) != resolved:
+            args[param] = resolved
+            changed = True
+
+    if not changed:
         return response
 
     call_id = (
@@ -1049,9 +1233,16 @@ def razonador_node(state: AgentState) -> dict:
     # razonables propuestos por él. Sin este empujón el modelo cuantizado
     # responde en texto plano y entra en bucle de preguntas. El LLM sigue
     # razonando: nosotros solo le indicamos que está autorizado a decidir.
+    # Guarda anti-bucle: las directivas que FUERZAN una tool call (delegación y
+    # seguimiento heredante) solo deben actuar al INICIO del turno. Si `last_tool`
+    # está fijado, venimos de ejecutar una tool y toca SINTETIZAR el resultado en
+    # texto: forzar otra tool call aquí (con tool_choice="any") impide cerrar el
+    # ciclo y el grafo entra en bucle hasta el recursion_limit (lo vimos con el
+    # trend, cuyo último humano "…reutilizando los mismos parámetros" reactivaba
+    # el forzado en cada ciclo de síntesis).
     last_human_text = _last_human_message_content(messages)
     force_tool_call = False
-    if last_human_text and _user_delegates(last_human_text):
+    if not last_tool and last_human_text and _user_delegates(last_human_text):
         pending_params = state.get("pending_params") or {}
         missing = (
             get_missing_params(pending_tool_state, pending_params)
@@ -1062,7 +1253,7 @@ def razonador_node(state: AgentState) -> dict:
         # pending_tool con missing, le dice qué params completar; si no falta
         # nada, le dice que invoque ya con lo que hay.
         messages = messages + [_build_delegation_directive(pending_tool_state, missing)]
-    elif last_human_text and _is_inheriting_followup(last_human_text, session_facts):
+    elif not last_tool and last_human_text and _is_inheriting_followup(last_human_text, session_facts):
         # Seguimiento que reutiliza parámetros de un turno anterior ("ahora con
         # los parámetros anteriores, una con tendencia…"). El modelo cuantizado
         # tiende a responder en texto imitando la plantilla de petición de datos
@@ -1126,6 +1317,31 @@ def razonador_node(state: AgentState) -> dict:
         if getattr(forced, "tool_calls", None):
             response = forced
 
+    # Red de seguridad RAG: si el usuario hizo una pregunta TEÓRICA y el modelo
+    # respondió en prosa (sin tool call) en vez de consultar la documentación,
+    # sintetizamos la llamada a `consultar_teoria` de forma determinista. Garantiza
+    # el grounding (la síntesis parte del contexto recuperado y cita fuentes) en vez
+    # de salir del conocimiento paramétrico del modelo. Mismas guardas que el
+    # force-action: solo al inicio de un ciclo (sin ToolMessage previo ni recogida
+    # de parámetros en curso). La query es la propia pregunta del usuario: el RAG
+    # híbrido (BM25 + denso) la resuelve sin reformulación del LLM.
+    if (
+        not getattr(response, "tool_calls", None)
+        and not last_tool
+        and not pending_tool_state
+        and "consultar_teoria" in _KNOWN_TOOL_NAMES
+        and _looks_like_theory_question(last_human_text)
+    ):
+        response = AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "consultar_teoria",
+                "args": {"query": last_human_text},
+                "id": f"call_{uuid.uuid4().hex[:12]}",
+                "type": "tool_call",
+            }],
+        )
+
     # Anti-invención (RULE_NO_INVENT defensiva): retira args sin respaldo en el
     # historial del usuario (fechas, frecuencias, métodos, listas numéricas,
     # nombres de columna, etc.). Debe ir ANTES del merge: si pending_params
@@ -1136,6 +1352,11 @@ def razonador_node(state: AgentState) -> dict:
     # conocidos para que el LLM solo necesite aportar los nuevos. Sin esto, los
     # modelos cuantizados pierden el contexto y reabren el bucle de preguntas.
     response = _merge_with_pending_params(response, state)
+    # Canonicaliza los enums código=nombre (distribution_type, trend_type) según
+    # lo que el usuario nombró: corrige el código si el modelo lo mapeó mal
+    # (p. ej. "normal" → 1, no 2). Va tras el merge para ver también el código
+    # recogido en un turno anterior.
+    response = _resolve_enum_codes(response, state)
 
     # Evento llm_call: tokens, tokens/s y si actuó el parser de fallback.
     # No-op cuando el subsistema de observabilidad está apagado.

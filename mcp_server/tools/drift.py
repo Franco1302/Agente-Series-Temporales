@@ -153,7 +153,18 @@ async def detect_drift(
             json_schema_extra={"evidence": "drift_method"},
         ),
     ],
-    inicio: Annotated[int, Field(description="Índice desde el que empezar el análisis.")] = 1,
+    inicio: Annotated[
+        int,
+        Field(
+            description="Índice desde el que empezar el análisis.",
+            # Invent-prone: el modelo tiende a rellenarlo con un número del
+            # contexto (p. ej. 200) aunque el usuario no lo pida, y un `inicio`
+            # mayor que el punto de corte interno deja la ventana de referencia
+            # vacía → 500 en la API. Con `evidence: integer`, si el usuario no
+            # escribió ningún número se descarta y cae al default seguro (1).
+            json_schema_extra={"evidence": "integer"},
+        ),
+    ] = 1,
     threshold: Annotated[
         Optional[float],
         Field(
@@ -204,16 +215,7 @@ async def detect_drift(
 
     USA cuando el usuario quiera saber si sus datos han cambiado de distribución
     respecto a un periodo anterior, o validar la estabilidad de un dataset.
-
-    El método elegido en `method` determina los parámetros relevantes:
-    - KS, JS, PSI: univariantes. Solo necesitan threshold (y num_bins para PSI).
-    - CUSUM: univariante secuencial. Necesita threshold y drift_cusum.
-    - MEWMA, HOTELLING: multivariantes. Necesitan min_instances, alpha, lambd (MEWMA).
-
     NO uses para preguntas teóricas (usa consultar_teoria).
-
-    Devuelve dict con: drift_detected, drift_label, per_column_report, method_used,
-    parameters_used, summary.
     """
 
     init_mcp_http_log()

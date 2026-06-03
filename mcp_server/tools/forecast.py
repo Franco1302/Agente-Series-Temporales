@@ -133,20 +133,9 @@ async def forecast_time_series(
     """Entrena un modelo predictivo y devuelve un horizonte de prediccion.
 
     USA cuando el usuario quiera estimar el comportamiento futuro de una serie,
-    comparar modelos predictivos o evaluar el error de un modelo concreto.
-
-    El modelo SARIMAX predice TODAS las columnas numéricas del CSV (no una
-    columna objetivo concreta): el CSV de salida contiene el histórico más el
-    horizonte predicho para cada una.
-
-    Flujo MCP:
-    1) Normaliza la entrada con Pydantic.
-    2) Selecciona endpoints /Datos y /Error segun el modelo.
-    3) Sube el CSV como multipart y guarda el CSV de prediccion.
-    4) Si `return_metrics=True`, solicita el endpoint de error y parsea JSON.
-    5) Si `with_plot=True`, solicita /Plot{datos_endpoint} y guarda el PNG.
-
-    Devuelve: output_path, metrics (si return_metrics), model_used, image_path, summary.
+    comparar modelos predictivos o evaluar el error de un modelo concreto. El
+    modelo SARIMAX predice TODAS las columnas numéricas del CSV, no una columna
+    objetivo concreta.
     """
     init_mcp_http_log()
     try:
@@ -189,16 +178,26 @@ async def forecast_time_series(
             target.write_bytes(response.content)
 
             if inp.return_metrics:
-                err_response = await client.post(
-                    error_endpoint,
-                    params=_error_params(inp),
-                    files={"file": (filename, content, mime)},
-                )
-                err_response.raise_for_status()
+                # Best-effort, igual que el PNG de abajo: la predicción
+                # (/Datos/Sarimax) ya es válida; las métricas (/Error/Sarimax) son
+                # secundarias. La API revienta calculándolas para ~2/3 de las
+                # longitudes (su `error_sarimax` compara test vs backtesting del
+                # train, con longitudes que no casan → 500). Ante ese fallo NO
+                # hundimos el forecast: devolvemos metrics=None en vez de inventar
+                # un MSE. Mejor sin métrica que con una métrica falsa.
                 try:
-                    metrics = err_response.json()
-                except Exception:
-                    metrics = {"raw": err_response.text[:500]}
+                    err_response = await client.post(
+                        error_endpoint,
+                        params=_error_params(inp),
+                        files={"file": (filename, content, mime)},
+                    )
+                    err_response.raise_for_status()
+                    try:
+                        metrics = err_response.json()
+                    except Exception:  # noqa: BLE001 — JSON ilegible: guardamos el texto
+                        metrics = {"raw": err_response.text[:500]}
+                except Exception:  # noqa: BLE001 — métricas opcionales: no abortan la tool
+                    metrics = None
 
             if inp.with_plot:
                 # Best-effort: el CSV ya es válido; un fallo de /Plot no debe abortar la tool.

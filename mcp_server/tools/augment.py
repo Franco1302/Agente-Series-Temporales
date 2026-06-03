@@ -124,18 +124,8 @@ async def augment_time_series(
 ) -> dict:
     """Genera observaciones adicionales para un CSV existente preservando estadisticos.
 
-    Flujo principal:
-    1) Normaliza y valida los parametros con un schema Pydantic.
-    2) Resuelve el endpoint segun la estrategia y arma los query params.
-    3) Abre el CSV, lo sube al backend y guarda la respuesta como un nuevo CSV.
-    4) Si `with_plot=True`, solicita el PNG asociado y lo persiste en disco.
-
-    Devuelve un dict con:
-    - output_path: ruta del CSV generado.
-    - new_rows: cantidad de filas nuevas solicitadas.
-    - strategy_used: estrategia aplicada.
-    - image_path: ruta del PNG (si se genero).
-    - summary: descripcion breve del resultado.
+    USA cuando el usuario quiera ampliar o aumentar un dataset ya existente con
+    más filas (data augmentation), no para crear una serie nueva desde cero.
     """
     init_mcp_http_log()
     try:
