@@ -155,20 +155,14 @@ class ObservabilitySettings:
 
 
 def load_observability_settings() -> ObservabilitySettings:
-    """Carga la configuración de observabilidad de forma laxa y descomprimida.
-    
-    EVITA lanzar ValueErrors rígidos si faltan variables secundarias en el .env.
+    """Carga la configuración de observabilidad del entorno de forma laxa.
+
+    No lanza errores si faltan variables: aplica defaults seguros
+    (OBSERVABILITY_ENABLED=false, LOG_LEVEL=INFO).
     """
-    import os
-    from src.config.llm_config import ObservabilitySettings  # Ajusta según tu namedtuple/dataclass si aplica
-    
-    # Leemos de forma segura usando os.environ.get sin reventar si no están definidas
     raw_enabled = os.environ.get("OBSERVABILITY_ENABLED", "false").lower()
     enabled = raw_enabled in ("true", "1", "yes")
-    
-    # Si no existe LOG_LEVEL, por defecto asumimos "INFO" de forma pacífica
     log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
-    
     return ObservabilitySettings(enabled=enabled, log_level=log_level)
 
 

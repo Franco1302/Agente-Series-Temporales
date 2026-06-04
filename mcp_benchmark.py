@@ -25,7 +25,7 @@ La invención es protagonista en ambos ejes y **erosiona el score**:
 
 Salida
 ------
-  * ``resultados_benchmark.csv`` — una fila por caso del Eje A y una fila por
+  * ``data/benchmarks/resultados_benchmark.csv`` — una fila por caso del Eje A y una fila por
     TURNO PUNTUADO del Eje B (``<caso>·<tool>``), con el eje, las métricas y los
     flags de invención.
   * Tres tablas en consola: Eje A, Eje B y ranking combinado (lo decide el Eje B).
@@ -1124,7 +1124,7 @@ def main() -> None:
                         help="Sufijos de los casos del Eje A, ej: --casos 1 5")
     parser.add_argument("--eje", choices=["a", "b", "ambos"], default="ambos",
                         help="Qué eje(s) correr (default: ambos)")
-    parser.add_argument("--salida", default="resultados_benchmark.csv",
+    parser.add_argument("--salida", default="data/benchmarks/resultados_benchmark.csv",
                         help="CSV de salida")
     args = parser.parse_args()
 

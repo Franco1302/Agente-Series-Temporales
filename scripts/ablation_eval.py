@@ -40,7 +40,6 @@ import csv
 import os
 import sys
 import time
-from collections import defaultdict
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
