@@ -65,7 +65,7 @@ def _build_context_fragments(documents: list[Document]) -> tuple[str, list[str]]
     fragmentos, sin andamiaje de metadatos por fragmento. Ese andamiaje
     (``[FRAGMENTO n]`` / ``Fuente`` / ``Jerarquia`` / ``Chunk ID``) hacia que el
     modelo pequeno copiara la plantilla en la respuesta en lugar de redactar.
-    La cita de fuentes es determinista (Paso 6), asi que los metadatos solo
+    La cita de fuentes es determinista, asi que los metadatos solo
     alimentan la lista ``sources`` para el bloque final.
     """
     fragments: list[str] = []
@@ -98,8 +98,8 @@ def consultar_teoria(
     """Consulta la base teorica del TFG y devuelve fragmentos como contexto documental.
 
     Devuelve el contexto recuperado SIN redactar una respuesta: la sintesis la
-    realiza el razonador del grafo. Asi se evita la doble pasada de LLM
-    (PlanMejoraRAG, Paso 5), que duplicaba la latencia del turno teorico.
+    realiza el razonador del grafo. Asi se evita la doble pasada de LLM, que
+    duplicaba la latencia del turno teorico.
     """
     clean_query = query.strip()
     if not clean_query:

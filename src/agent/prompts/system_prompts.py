@@ -212,7 +212,7 @@ class PromptAblation:
     """Flags para activar/desactivar reglas individuales del prompt.
 
     Por defecto todas están activadas: el prompt resultante es byte-exact al
-    que producía ``build_system_prompt`` antes del refactor (Tarea 1 del brief).
+    que producía ``build_system_prompt`` antes del refactor de parametrización.
 
     Attributes:
         include_no_invent: Si ``False``, se elimina ``RULE_NO_INVENT`` del

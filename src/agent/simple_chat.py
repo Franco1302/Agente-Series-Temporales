@@ -1,9 +1,8 @@
 """Puente mínimo de chat entre la UI de Streamlit y el cliente LLM local."""
 
-# Este módulo se centra exclusivamente en la lógica de transformación de mensajes 
+# Este módulo se centra exclusivamente en la lógica de transformación de mensajes
 # y la interacción directa con el cliente LLM.
 # No debe contener lógica de UI ni detalles de configuración, que se manejan en otros módulos.
-# La función `generate_chat_response` es el punto de integración clave para futuras orquestaciones con LangGraph.
 
 
 from __future__ import annotations
@@ -44,8 +43,8 @@ def generate_chat_response(
 ) -> str:
     """Envía el historial al LLM y devuelve la respuesta del asistente.
 
-    Esta función mantiene una interfaz reducida a propósito porque será
-    el punto de integración para la orquestación con LangGraph en próximas fases.
+    Mantiene una interfaz reducida a propósito: es un puente mínimo entre la UI
+    y el cliente LLM.
     """
     if not history:
         raise ValueError("El historial debe contener al menos un mensaje de usuario.")

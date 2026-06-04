@@ -133,10 +133,10 @@ def _build_fuentes_section(messages: list) -> str | None:
 def _append_fuentes(response: AIMessage, messages: list) -> None:
     """Anexa de forma determinista la sección Fuentes a la respuesta final.
 
-    Paso 6 del PlanMejoraRAG: la instrucción del prompt no basta con el modelo
-    3B local. Copiar las fuentes del output de ``consultar_teoria`` garantiza la
-    cita y evita que el modelo invente referencias. No-op si la respuesta ya
-    incluye la sección o si no hay bloque de fuentes que citar.
+    La instrucción del prompt no basta con el modelo 3B local. Copiar las
+    fuentes del output de ``consultar_teoria`` garantiza la cita y evita que el
+    modelo invente referencias. No-op si la respuesta ya incluye la sección o
+    si no hay bloque de fuentes que citar.
     """
     content = response.content
     if not isinstance(content, str) or not content.strip():
@@ -1376,7 +1376,7 @@ def razonador_node(state: AgentState) -> dict:
     # Detectar si hay una tool call y si le faltan parámetros
     tool_calls = getattr(response, "tool_calls", None) or []
 
-    # Citas trazables (Paso 6): cuando el razonador cierra el ciclo RAG con la
+    # Citas trazables: cuando el razonador cierra el ciclo RAG con la
     # respuesta final (texto, sin tool call), se anexa la sección Fuentes de
     # forma determinista a partir del contexto que devolvió consultar_teoria.
     if not tool_calls and last_tool == "consultar_teoria":
