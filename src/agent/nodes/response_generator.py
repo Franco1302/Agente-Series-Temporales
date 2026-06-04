@@ -25,7 +25,6 @@ def generar_respuesta_node(state: AgentState) -> dict:
     """
     csv_path = state.get("csv_path")
     csv_metadata = state.get("csv_metadata")
-    rag_context = state.get("rag_context")
 
     system_prompt = build_system_prompt(csv_path=csv_path, csv_metadata=csv_metadata)
 
@@ -34,11 +33,6 @@ def generar_respuesta_node(state: AgentState) -> dict:
     # Inyectar system prompt si aún no está como primer mensaje
     if not messages or not isinstance(messages[0], SystemMessage):
         messages = [SystemMessage(content=system_prompt)] + messages
-
-    # Inyectar contexto RAG como segundo SystemMessage si está disponible
-    if rag_context:
-        rag_msg = SystemMessage(content=f"CONTEXTO TEÓRICO RECUPERADO:\n{rag_context}")
-        messages = [messages[0], rag_msg] + messages[1:]
 
     llm = get_llm_with_tools([])
     t0 = time.perf_counter()

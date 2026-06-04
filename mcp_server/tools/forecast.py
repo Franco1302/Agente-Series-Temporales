@@ -128,7 +128,13 @@ async def forecast_time_series(
         ),
     ] = "sarimax",
     return_metrics: Annotated[bool, Field(description="Si True, también devuelve métricas de error.")] = True,
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG con la predicción.")] = True,
+    with_plot: Annotated[
+        bool,
+        Field(
+            description="Si True, también genera PNG con la predicción.",
+            json_schema_extra={"evidence": "plot_pref"},
+        ),
+    ] = True,
 ) -> dict:
     """Entrena un modelo predictivo y devuelve un horizonte de prediccion.
 

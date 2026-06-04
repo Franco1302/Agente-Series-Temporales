@@ -99,7 +99,13 @@ async def create_exogenous_variable(
             },
         ),
     ] = None,
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
+    with_plot: Annotated[
+        bool,
+        Field(
+            description="Si True, también genera PNG.",
+            json_schema_extra={"evidence": "plot_pref"},
+        ),
+    ] = True,
 ) -> dict:
     """Añade una nueva columna sintetica al CSV calculada a partir de las existentes.
 

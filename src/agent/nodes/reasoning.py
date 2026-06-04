@@ -592,6 +592,16 @@ _EXOGENOUS_RELATION_NAMES: tuple[str, ...] = (
     "pca", "principal", "correla", "covar", "lineal", "linear",
     "polinom", "polynom", "relaci[oó]n",
 )
+# Cualquier mención (a favor o en contra) de la gráfica/imagen. Es la evidencia
+# que habilita respetar el `with_plot` que emite el modelo: sin mención, el
+# booleano va sin respaldo (los modelos cuantizados con schema fino rellenan
+# `with_plot=False` por defecto y suprimen el PNG), así que se descarta y aplica
+# el default `True` del schema. Con mención ("con gráfica" / "sin imagen") se
+# conserva el valor del modelo, sea True o False.
+_PLOT_PREF_NAMES: tuple[str, ...] = (
+    "gr[aá]fic", "grafic", "imagen", "im[aá]genes", "plot", "visualiz",
+    "dibuj", "png", "chart", "figura", "represent",
+)
 
 
 def _has_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
@@ -645,6 +655,16 @@ def _check_exogenous_relation(user_text: str, value: object, state: dict) -> boo
     return _has_any_keyword(user_text, _EXOGENOUS_RELATION_NAMES)
 
 
+def _check_plot_pref(user_text: str, value: object, state: dict) -> bool:
+    """Evidencia para `with_plot`: el usuario mencionó algo sobre la gráfica.
+
+    Sin mención, el `with_plot` emitido por el modelo carece de respaldo y se
+    descarta (→ default True del schema, que sí genera el PNG). Con mención, se
+    respeta el valor del modelo (p. ej. "sin gráfica" → with_plot=False).
+    """
+    return _has_any_keyword(user_text, _PLOT_PREF_NAMES)
+
+
 def _check_existing_column(user_text: str, value: object, state: dict) -> bool:
     """Columna que debe existir en el CSV activo (index_column, target_column).
 
@@ -685,6 +705,7 @@ _CHECKS: dict[str, Callable[[str, object, dict], bool]] = {
     "exogenous_relation": _check_exogenous_relation,
     "existing_column": _check_existing_column,
     "new_column": _check_new_column,
+    "plot_pref": _check_plot_pref,
 }
 
 
@@ -937,6 +958,20 @@ def _resolve_enum_codes(response: AIMessage, state: AgentState) -> AIMessage:
     )
 
 
+def _drop_empty_args(args: dict) -> dict:
+    """Elimina los args con valor "ausente" (``None``, ``""`` o ``[]``).
+
+    Los modelos cuantizados con schema fino emiten a menudo *placeholders* vacíos
+    para parámetros que no aplican (p. ej. el miembro XOR que no usan:
+    ``end_date=""`` cuando van a pasar ``periods``). Esos vacíos se arrastran en
+    ``pending_params`` y llegan literalmente a la tool MCP, cuya validación trata
+    ``end_date=""`` como "provisto" y rechaza la llamada con "no ambos". Limpiarlos
+    aquí garantiza que solo viajen valores reales: lo que falte se detecta como
+    ausente (``get_missing_params``) y se pide al usuario, no se manda vacío.
+    """
+    return {k: v for k, v in args.items() if v not in (None, "", [])}
+
+
 def _merge_with_pending_params(response: AIMessage, state: AgentState) -> AIMessage:
     """Fusiona los args ya recogidos en `pending_params` con la nueva tool call.
 
@@ -1049,7 +1084,6 @@ def _replay_pending_tool_call(state: AgentState) -> dict:
 
     return {
         "messages": [tool_call_msg],
-        "rag_context": None,
         "pending_tool": None,
         "pending_params": None,
         "optionals_confirmed_for": None,
@@ -1370,7 +1404,6 @@ def razonador_node(state: AgentState) -> dict:
 
     updates: dict = {
         "messages": [response],
-        "rag_context": None,
     }
 
     # Detectar si hay una tool call y si le faltan parámetros
@@ -1419,6 +1452,29 @@ def razonador_node(state: AgentState) -> dict:
                 )
                 updates["messages"] = [response]
                 args = enriched_args
+
+        # Descarta los placeholders vacíos antes de evaluar faltantes, persistir
+        # `pending_params` o ejecutar: si quedaran, viajarían literalmente a la
+        # tool (p. ej. `end_date=""` junto a `periods`, que la API rechaza como
+        # "no ambos"). Reconstruimos la tool call para que el ToolNode reciba los
+        # args limpios y `pending_params` no acumule vacíos entre turnos.
+        cleaned = _drop_empty_args(args)
+        if cleaned != args:
+            call_id = (
+                call.get("id") if isinstance(call, dict) else getattr(call, "id", None)
+            ) or f"call_{uuid.uuid4().hex[:12]}"
+            response = AIMessage(
+                content=response.content,
+                tool_calls=[{
+                    "name": tool_name,
+                    "args": cleaned,
+                    "id": call_id,
+                    "type": "tool_call",
+                }],
+                additional_kwargs=getattr(response, "additional_kwargs", {}) or {},
+            )
+            updates["messages"] = [response]
+            args = cleaned
 
         missing = get_missing_params(tool_name, args)
         missing_groups = get_missing_alternative_groups(tool_name, args)

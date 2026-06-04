@@ -63,10 +63,17 @@ def recuperar_contexto_node(state: AgentState) -> dict:
         return {}
 
     t0 = time.perf_counter()
-    
-    # Invocación real síncrona de la herramienta RAG documental
-    result = consultar_teoria.invoke({"query": query_text})
-    
+
+    # Invocación real síncrona de la herramienta RAG documental. Capturamos
+    # cualquier excepción para no dejar nunca huérfana la tool call de
+    # consultar_teoria: el grafo enruta recuperar_contexto → razonador de forma
+    # incondicional, así que un fallo debe convertirse igualmente en un
+    # ToolMessage (con el texto del error) que el razonador pueda explicar.
+    try:
+        result = consultar_teoria.invoke({"query": query_text})
+    except Exception as exc:  # noqa: BLE001 — el fallo se reporta como ToolMessage
+        result = f"Error: Falló la consulta a la base teórica. Detalle técnico: {exc}"
+
     duration_ms = (time.perf_counter() - t0) * 1000.0
 
     # Extraemos de forma limpia las métricas del RAG (Scores, Chunks, Inner Tokens)
@@ -87,9 +94,12 @@ def recuperar_contexto_node(state: AgentState) -> dict:
             )
         )
 
-    if isinstance(result, str) and result.startswith("Error:"):
-        return {"error_info": result}
-
+    # Siempre devolvemos un ToolMessage —también cuando `result` empieza por
+    # "Error:"— para preservar la invariante "toda tool call tiene su respuesta".
+    # Antes, un fallo devolvía {"error_info": ...} que la arista incondicional
+    # recuperar_contexto → razonador nunca enrutaba a gestionar_error, y dejaba
+    # la tool call sin ToolMessage asociado. El razonador sintetiza ahora una
+    # explicación honesta del fallo a partir de este mensaje.
     return {
         "messages": [
             ToolMessage(

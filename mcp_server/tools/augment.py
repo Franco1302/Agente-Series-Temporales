@@ -120,7 +120,13 @@ async def augment_time_series(
             json_schema_extra={"tunable_if": {"strategy": ["statistical"]}},
         ),
     ] = 1,
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
+    with_plot: Annotated[
+        bool,
+        Field(
+            description="Si True, también genera PNG.",
+            json_schema_extra={"evidence": "plot_pref"},
+        ),
+    ] = True,
 ) -> dict:
     """Genera observaciones adicionales para un CSV existente preservando estadisticos.
 

@@ -300,7 +300,13 @@ async def generate_synthetic_distribution(
         ),
     ] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna generada.")] = "valor",
-    with_plot: Annotated[bool, Field(description="Si True, genera además un PNG con la gráfica.")] = True,
+    with_plot: Annotated[
+        bool,
+        Field(
+            description="Si True, genera además un PNG con la gráfica.",
+            json_schema_extra={"evidence": "plot_pref"},
+        ),
+    ] = True,
 ) -> dict:
     """Genera una serie temporal sintética siguiendo una distribución estadistica.
 
@@ -407,7 +413,13 @@ async def generate_synthetic_arma(
         list[float],
         Field(description="Coeficientes MA. Lista vacía = sin MA.", json_schema_extra={"tunable": True}),
     ] = [],
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
+    with_plot: Annotated[
+        bool,
+        Field(
+            description="Si True, también genera PNG.",
+            json_schema_extra={"evidence": "plot_pref"},
+        ),
+    ] = True,
 ) -> dict:
     """Genera una serie temporal con estructura ARMA(p,q).
 
@@ -534,7 +546,13 @@ async def generate_synthetic_periodic(
         ),
     ] = None,
     column_name: Annotated[str, Field(description="Nombre de la columna.")] = "valor",
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
+    with_plot: Annotated[
+        bool,
+        Field(
+            description="Si True, también genera PNG.",
+            json_schema_extra={"evidence": "plot_pref"},
+        ),
+    ] = True,
 ) -> dict:
     """Genera una serie temporal con patrones ciclicos repetidos.
 
@@ -646,7 +664,13 @@ async def generate_synthetic_trend(
         float,
         Field(description="Magnitud del ruido aditivo gaussiano.", json_schema_extra={"tunable": True}),
     ] = 0.0,
-    with_plot: Annotated[bool, Field(description="Si True, también genera PNG.")] = True,
+    with_plot: Annotated[
+        bool,
+        Field(
+            description="Si True, también genera PNG.",
+            json_schema_extra={"evidence": "plot_pref"},
+        ),
+    ] = True,
 ) -> dict:
     """Genera una serie temporal con tendencia determinista.
 

@@ -40,9 +40,6 @@ class AgentState(TypedDict):
     # razonador.
     optionals_confirmed_for: Optional[str]
 
-    # Fragmentos de documentación recuperados por el nodo recuperar_contexto
-    rag_context: Optional[str]
-
     # Contador de errores consecutivos; limita el bucle de reintentos (máx. 3)
     error_count: int
 

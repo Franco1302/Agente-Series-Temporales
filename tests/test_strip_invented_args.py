@@ -466,7 +466,6 @@ def test_delegation_directive_injected_when_pending_and_missing():
         "pending_tool": "generate_synthetic_distribution",
         "pending_params": {},
         "optionals_confirmed_for": None,
-        "rag_context": None,
         "error_count": 0,
         "error_info": None,
     }
@@ -517,7 +516,6 @@ def test_delegation_directive_injected_when_no_pending_tool():
         "pending_tool": None,
         "pending_params": None,
         "optionals_confirmed_for": None,
-        "rag_context": None,
         "error_count": 0,
         "error_info": None,
     }
@@ -547,7 +545,6 @@ def test_delegation_directive_not_injected_without_delegation():
         "pending_tool": None,
         "pending_params": None,
         "optionals_confirmed_for": None,
-        "rag_context": None,
         "error_count": 0,
         "error_info": None,
     }
@@ -578,7 +575,6 @@ def test_razonador_node_routes_to_pending_when_llm_invents_args():
         "pending_tool": None,
         "pending_params": None,
         "optionals_confirmed_for": None,
-        "rag_context": None,
         "error_count": 0,
         "error_info": None,
     }

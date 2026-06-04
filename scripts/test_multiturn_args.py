@@ -167,7 +167,6 @@ def _run_forgetful_case(case: ForgetfulCase) -> tuple[bool, str]:
         "pending_tool": case.tool,
         "pending_params": dict(case.already_collected),
         "optionals_confirmed_for": None,
-        "rag_context": None,
         "error_count": 0,
         "error_info": None,
     }
