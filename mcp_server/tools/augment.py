@@ -38,6 +38,34 @@ class AugmentTimeSeriesInput(BaseModel):
     with_plot: bool = True
 
 
+def _restore_index_label(content: bytes, index_column: str) -> bytes:
+    """Devuelve el CSV con la columna índice renombrada al nombre original.
+
+    La API escribe SIEMPRE el CSV con ``index_label="Indice"`` (hardcodeado en
+    todos sus endpoints), así que un CSV con índice 'indice' sale como 'Indice'.
+    Eso rompe el encadenado del caso 3: el agente aumenta y luego predice el
+    fichero reusando el ``index_column`` original ('indice') que ya no existe en
+    la salida → 400 Bad Request en /Datos/Sarimax. Reescribimos solo el primer
+    campo del header (el índice siempre es la primera columna) para que el
+    fichero aumentado conserve el esquema de entrada. Best-effort: ante cualquier
+    problema devolvemos el contenido sin tocar.
+    """
+    if index_column == "Indice":
+        return content
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return content
+    newline = text.find("\n")
+    if newline == -1:
+        return content
+    fields = text[:newline].split(",")
+    if not fields or fields[0] == index_column:
+        return content
+    fields[0] = index_column
+    return (",".join(fields) + text[newline:]).encode("utf-8")
+
+
 def _build_query_params(inp: AugmentTimeSeriesInput) -> dict:
     """Construye los parametros esperados por el backend segun la estrategia.
 
@@ -159,7 +187,7 @@ async def augment_time_series(
             )
             response.raise_for_status()
             target = _SETTINGS.workspace_dir / out_name
-            target.write_bytes(response.content)
+            target.write_bytes(_restore_index_label(response.content, inp.index_column))
 
             png_path: Optional[Path] = None
             if inp.with_plot:

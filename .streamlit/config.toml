@@ -1,0 +1,6 @@
+[server]
+# Habilita servir ficheros estáticos desde el directorio `static/` (relativo al
+# entrypoint ui/app.py). Lo usa la UI para publicar los CSV/PNG generados por las
+# herramientas y enlazarlos en la respuesta del agente como descargas reales
+# (app/static/<nombre>), en vez de rutas locales que el navegador no puede abrir.
+enableStaticServing = true

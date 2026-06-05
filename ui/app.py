@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -28,6 +29,12 @@ from src.observability import (
 
 # Directorio donde se guardan los ficheros subidos por el usuario.
 _UPLOADS_DIR = Path(__file__).resolve().parents[1] / "data" / "temp_uploads"
+
+# Directorio que Streamlit sirve como estático (relativo al entrypoint ui/app.py,
+# expuesto en la URL `app/static/...`). Requiere enableStaticServing=true en
+# .streamlit/config.toml. Ahí se publican los artefactos generados para que la
+# respuesta del agente pueda enlazarlos como descargas reales.
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 # ── Inicialización de sesión ────────────────────────────────────────────────
@@ -114,7 +121,9 @@ def _render_history(history: list[dict]) -> None:
     """Renderiza el historial de mensajes en formato chat."""
     for turn in history:
         with st.chat_message(turn["role"]):
-            st.markdown(turn["content"])
+            # unsafe_allow_html: el historial conserva las anclas <a download> que
+            # _linkify_artifacts inserta en las respuestas (descarga directa).
+            st.markdown(turn["content"], unsafe_allow_html=True)
 
 
 def _render_sidebar() -> None:
@@ -316,6 +325,11 @@ def _run_agent_streaming(user_prompt: str, csv_path: str | None) -> tuple[str, s
         _render_artifact_debug(tool_messages, artifacts, csv_path)
     _render_generated_artifacts(artifacts)
 
+    # Convierte las menciones a ficheros en la respuesta en enlaces de descarga
+    # reales (app/static/...) antes de devolverla: así se renderiza y se guarda
+    # en el historial ya con los enlaces funcionales, no con rutas locales muertas.
+    final_response = _linkify_artifacts(final_response, artifacts)
+
     total_ms = (time.perf_counter() - turn_t0) * 1000.0
     emit(TraceEvent(
         trace_id=trace_id,
@@ -422,6 +436,49 @@ def _render_generated_artifacts(artifacts: list[Path]) -> None:
                     st.warning(f"No se pudo previsualizar {p.name}: {exc}")
 
 
+def _publish_to_static(path: Path) -> str:
+    """Copia un artefacto al directorio estático servido y devuelve su URL.
+
+    Streamlit sirve `_STATIC_DIR` bajo la ruta `app/static/`. Copiamos solo si
+    el destino no existe o está desactualizado, y devolvemos la URL relativa
+    `app/static/<nombre>` lista para usar en un enlace Markdown.
+    """
+    _STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    dest = _STATIC_DIR / path.name
+    if not dest.exists() or dest.stat().st_mtime < path.stat().st_mtime:
+        dest.write_bytes(path.read_bytes())
+    return f"app/static/{path.name}"
+
+
+def _linkify_artifacts(text: str, artifacts: list[Path]) -> str:
+    """Convierte las menciones a ficheros generados en enlaces de descarga reales.
+
+    Por cada artefacto se publica una copia en el directorio estático y se
+    reescribe su aparición en la respuesta del agente —ya sea un enlace Markdown
+    muerto ``[nombre](ruta-local)`` o el nombre en texto plano— por un ancla HTML
+    ``<a href="app/static/<nombre>" download="<nombre>">`` que el navegador
+    descarga directamente al hacer clic (en vez de abrir el CSV/PNG en una
+    pestaña). Requiere renderizar con ``unsafe_allow_html=True``. Usa un centinela
+    intermedio para no re-enlazar el nombre que queda dentro de la propia URL.
+    """
+    if not text or not artifacts:
+        return text
+    for i, p in enumerate(artifacts):
+        name = p.name
+        url = _publish_to_static(p)
+        # Centinela por índice: NO contiene `name`, así el paso 2 no lo vuelve a
+        # tocar (evita anidar centinelas y dejar bytes nulos sueltos).
+        sentinel = f"\x00{i}\x00"
+        # 1) Enlaces Markdown existentes con ese nombre como texto → centinela.
+        text = re.sub(r"\[" + re.escape(name) + r"\]\([^)]*\)", sentinel, text)
+        # 2) Menciones en texto plano restantes → centinela.
+        text = text.replace(name, sentinel)
+        # 3) Centinela → ancla de descarga directa (el atributo `download` fuerza
+        #    la descarga same-origin en vez de navegar al fichero).
+        text = text.replace(sentinel, f'<a href="{url}" download="{name}">{name}</a>')
+    return text
+
+
 # ── Bucle principal ─────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -447,7 +504,9 @@ def main() -> None:
                 csv_path=_get_csv_path(),
             )
             if assistant_reply:
-                st.markdown(assistant_reply)
+                # unsafe_allow_html: render de las anclas <a download> de descarga
+                # directa que inserta _linkify_artifacts (ver más abajo).
+                st.markdown(assistant_reply, unsafe_allow_html=True)
             else:
                 assistant_reply = "(El agente no produjo una respuesta de texto.)"
                 st.warning(assistant_reply)

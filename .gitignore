@@ -48,6 +48,9 @@ Thumbs.db
 data/**/*
 !data/**/
 !data/**/.gitkeep
+
+# Copias de artefactos publicadas para descarga vía static serving de Streamlit
+ui/static/
 CLAUDE.md
 *.md
 requirements_benchmark.txt

@@ -342,14 +342,11 @@ def _patch_ablation_context(ablation: Any):
 
     original = _reasoning.build_system_prompt
 
-    def _patched(csv_path=None, csv_metadata=None, tool_result_to_explain=None,
-                 ablation=ablation, _orig=_sp.build_system_prompt):
-        return _orig(
-            csv_path=csv_path,
-            csv_metadata=csv_metadata,
-            tool_result_to_explain=tool_result_to_explain,
-            ablation=ablation,
-        )
+    def _patched(*args, _ablation=ablation, _orig=_sp.build_system_prompt, **kwargs):
+        # Reenvía cualquier firma de build_system_prompt (incl. kwargs nuevos
+        # como session_context) y solo fuerza la ablación de esta corrida.
+        kwargs["ablation"] = _ablation
+        return _orig(*args, **kwargs)
 
     class _Ctx:
         def __enter__(self):
