@@ -27,41 +27,10 @@ _BACKEND_FREQS: tuple[str, ...] = ("B", "D", "W", "M", "Q", "Y")
 _PERIOD_START_ALIASES: tuple[str, ...] = ("MS", "QS", "YS", "AS")
 
 
-def _resolve_index_column(content: bytes, index_column: str) -> str:
-    """Devuelve el nombre real de la columna índice en el CSV.
-
-    El LLM pasa a veces otra capitalización o con espacios ('Indice' vs
-    'indice'); pandas y el backend distinguen mayúsculas, así que sin esto la
-    inferencia de frecuencia falla y el backend responde 400 'Index ... invalid'.
-    Match tolerante por strip+casefold; si no hay coincidencia, devuelve el valor
-    original (el backend dará el error correspondiente).
-    """
-    try:
-        cols = pd.read_csv(io.BytesIO(content), nrows=0).columns
-    except Exception:  # noqa: BLE001
-        return index_column
-    if index_column in cols:
-        return index_column
-    norm = {str(c).strip().casefold(): c for c in cols}
-    return norm.get(str(index_column).strip().casefold(), index_column)
-
-
 def _normalize_csv_for_backend(
     content: bytes, index_column: str,
 ) -> tuple[bytes, Optional[str]]:
-    """Adapta el CSV al contrato del backend Sarimax.
-
-    El backend hace ``df.index.freq = freq`` y pandas rechaza el mismatch entre
-    fechas "start of period" (MS/QS/YS) y el alias "end of period" (M/Q/Y) que
-    es el único que el backend acepta. Si detecto ese caso, reescribo la
-    columna índice con las fechas movidas al final del periodo, y devuelvo el
-    nuevo contenido junto con el alias normalizado.
-
-    Devuelve ``(content_quizás_reescrito, freq_inferida_o_None)``. Cualquier
-    excepción se silencia: la normalización es best-effort y nunca debe abortar
-    la llamada — si no puedo inferir, devuelvo ``(content, None)`` y el caller
-    usa la frequency que ya tenía.
-    """
+    """Adapta el CSV al contrato del backend Sarimax."""
     try:
         df = pd.read_csv(io.BytesIO(content))
         if index_column not in df.columns:
@@ -88,18 +57,12 @@ def _normalize_csv_for_backend(
 
 
 class ForecastTimeSeriesInput(BaseModel):
-    """Esquema de entrada normalizado para la prediccion de series.
-
-    No hay `target_column`: el backend SARIMAX (`/Datos/Sarimax`) predice TODAS
-    las columnas numéricas del CSV (itera `for x in df.columns`), no una sola.
-    Pedir una columna objetivo sería un contrato falso —la API la ignoraría—,
-    así que el horizonte se aplica al dataset completo.
-    """
+    """Esquema de entrada normalizado para la prediccion de series."""
     file_path: str
     index_column: str
     model: Literal["sarimax"] = "sarimax"
     forecast_steps: int
-    frequency: Literal["B", "D", "W", "M", "Q", "Y"] = "D"
+    frequency: Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"] = "D"
     return_metrics: bool = True
     with_plot: bool = True
 
@@ -112,24 +75,6 @@ def _datos_params(inp: ForecastTimeSeriesInput) -> dict:
 def _error_params(inp: ForecastTimeSeriesInput) -> dict:
     """Parametros para /Error/Sarimax: solo indice y frecuencia."""
     return {"indice": inp.index_column, "freq": inp.frequency}
-
-
-def _normalize_model(model: str) -> str:
-    """Normaliza el nombre del modelo, tolerando mayúsculas/comillas.
-
-    El LLM emite 'SARIMAX' (así aparece en el prompt y los triggers) pero el
-    contrato canónico es 'sarimax'. Como `model` es ``str`` (no ``Literal``),
-    FastMCP ya no rechaza el valor con un literal_error antes del cuerpo —que
-    dejaba al agente en bucle reintentando el mismo 'SARIMAX'—; aquí lo
-    canonicalizamos y validamos. ``ValueError`` → translate_exception lo formatea
-    como "Parámetro inválido…".
-    """
-    norm = str(model).strip().strip("'\"").lower()
-    if norm != "sarimax":
-        raise ValueError(
-            f"Modelo '{model}' no soportado. Actualmente solo 'sarimax' está operativo."
-        )
-    return "sarimax"
 
 
 @mcp.tool()
@@ -151,22 +96,17 @@ async def forecast_time_series(
         ),
     ],
     frequency: Annotated[
-        Literal["B", "D", "W", "M", "Q", "Y"],
+        Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"],
         Field(
-            # Sin tunable: evita un turno extra de confirmación tras recoger
-            # forecast_steps (el backend ya infiere/ajusta la frecuencia del CSV).
             description="Frecuencia temporal de la serie (debe coincidir con el CSV).",
+            json_schema_extra={"tunable": True},
         ),
     ] = "D",
     model: Annotated[
-        str,
+        Literal["sarimax"],
         Field(
-            # str tolerante (no Literal) y sin tunable: el LLM emite 'SARIMAX' en
-            # mayúsculas y un Literal['sarimax'] lo rechazaba con literal_error
-            # ANTES del cuerpo, dejando al agente en bucle. Se normaliza con
-            # _normalize_model. Marcarlo tunable, además, provocaba un turno extra
-            # pidiendo el "modelo" en cada predicción.
-            description="Modelo de predicción. Actualmente solo 'sarimax' está operativo (no distingue mayúsculas).",
+            description="Modelo de predicción. Actualmente solo 'sarimax' está operativo.",
+            json_schema_extra={"tunable": True},
         ),
     ] = "sarimax",
     return_metrics: Annotated[bool, Field(description="Si True, también devuelve métricas de error.")] = True,
@@ -182,12 +122,11 @@ async def forecast_time_series(
 
     USA cuando el usuario quiera estimar el comportamiento futuro de una serie,
     comparar modelos predictivos o evaluar el error de un modelo concreto. El
-    modelo SARIMAX predice TODAS las columnas numéricas del CSV, no una columna
+    modelo sarimax predice TODAS las columnas numéricas del CSV, no una columna
     objetivo concreta.
     """
     init_mcp_http_log()
     try:
-        model = _normalize_model(model)
         inp = ForecastTimeSeriesInput(
             file_path=file_path, index_column=index_column, model=model,
             forecast_steps=forecast_steps, frequency=frequency,
@@ -196,12 +135,6 @@ async def forecast_time_series(
         datos_endpoint = _DATOS_ENDPOINT
         error_endpoint = _ERROR_ENDPOINT
         filename, content, mime = open_csv_for_upload(inp.file_path)
-
-        # Resuelve el nombre real de la columna índice (tolerando mayúsculas/
-        # espacios): el agente puede pasar 'Indice' cuando la columna es 'indice'.
-        resolved_index = _resolve_index_column(content, inp.index_column)
-        if resolved_index != inp.index_column:
-            inp = inp.model_copy(update={"index_column": resolved_index})
 
         # El backend revienta con 500 si la frequency pasada no coincide con la
         # inferida del índice. Normalizo: override de frequency y, si las fechas
@@ -233,13 +166,6 @@ async def forecast_time_series(
             target.write_bytes(response.content)
 
             if inp.return_metrics:
-                # Best-effort, igual que el PNG de abajo: la predicción
-                # (/Datos/Sarimax) ya es válida; las métricas (/Error/Sarimax) son
-                # secundarias. La API revienta calculándolas para ~2/3 de las
-                # longitudes (su `error_sarimax` compara test vs backtesting del
-                # train, con longitudes que no casan → 500). Ante ese fallo NO
-                # hundimos el forecast: devolvemos metrics=None en vez de inventar
-                # un MSE. Mejor sin métrica que con una métrica falsa.
                 try:
                     err_response = await client.post(
                         error_endpoint,
