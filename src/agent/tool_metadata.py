@@ -52,7 +52,7 @@ TOOL_TRIGGERS: dict[str, str] = {
     "generate_synthetic_trend": '"tendencia", "creciente", "decreciente lineal/polinómico/exponencial"',
     "detect_drift": '"drift", "ha cambiado", "estabilidad de los datos"',
     "augment_time_series": '"aumentar datos", "más observaciones", "ampliar dataset"',
-    "create_exogenous_variable": '"variable exógena", "nueva columna", "PCA", "correlación"',
+    "create_exogenous_variable": '"variable exógena", "nueva columna", "correlación", "covarianza"',
     "forecast_time_series": '"predecir", "forecast", "futuro", "SARIMAX"',
 }
 

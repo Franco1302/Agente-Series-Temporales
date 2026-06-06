@@ -30,6 +30,7 @@ from mcp_server.tools.exogenous import (
 )
 from mcp_server.tools.forecast import (
     _normalize_csv_for_backend,
+    _normalize_model,
     forecast_time_series,
 )
 from mcp_server.tools.synthetic import (
@@ -318,51 +319,24 @@ async def test_augment_happy_path(respx_mock, sample_csv):
 
 # ─────────────────────────── exogenous ───────────────────────────
 
-def test_exogenous_params_pca():
+def test_exogenous_params_correlation():
     inp = CreateExogenousVariableInput(
-        file_path="/tmp/x.csv", index_column="ts", new_column_name="pca1", relation="pca",
+        file_path="/tmp/x.csv", index_column="ts", new_column_name="corr1", relation="correlation",
     )
-    assert exo_params(inp) == {"indice": "ts", "columna": "pca1"}
-
-
-def test_exogenous_params_linear():
-    inp = CreateExogenousVariableInput(
-        file_path="/tmp/x.csv", index_column="ts", new_column_name="y",
-        relation="linear", coefficients=[2.0, 0.5],
-    )
-    params = exo_params(inp)
-    assert params["a"] == 2.0
-    assert params["b"] == 0.5
-
-
-def test_exogenous_params_linear_missing_coefficients():
-    inp = CreateExogenousVariableInput(
-        file_path="/tmp/x.csv", index_column="ts", new_column_name="y", relation="linear",
-    )
-    with pytest.raises(ValueError):
-        exo_params(inp)
-
-
-def test_exogenous_params_polynomial():
-    inp = CreateExogenousVariableInput(
-        file_path="/tmp/x.csv", index_column="ts", new_column_name="p",
-        relation="polynomial", coefficients=[0.0, 1.0, 0.5],
-    )
-    params = exo_params(inp)
-    assert params["a"] == [0.0, 1.0, 0.5]
+    assert exo_params(inp) == {"indice": "ts", "columna": "corr1"}
 
 
 @respx.mock(base_url="http://testserver")
 @pytest.mark.asyncio
 async def test_exogenous_happy_path(respx_mock, sample_csv):
-    respx_mock.post("/Variables/PCA").mock(
-        return_value=httpx.Response(200, content=b"ts,v1,v2,pca1\n2024-01-01,1,10,0.5\n")
+    respx_mock.post("/Variables/Correlacion").mock(
+        return_value=httpx.Response(200, content=b"ts,v1,v2,corr1\n2024-01-01,1,10,0.5\n")
     )
     out = await create_exogenous_variable(
-        file_path=str(sample_csv), index_column="ts", new_column_name="pca1", relation="pca",
+        file_path=str(sample_csv), index_column="ts", new_column_name="corr1", relation="correlation",
     )
     assert "output_path" in out
-    assert out["relation_used"] == "pca"
+    assert out["relation_used"] == "correlation"
 
 
 # ─────────────────────────── forecast ───────────────────────────
@@ -397,6 +371,35 @@ async def test_forecast_no_metrics(respx_mock, sample_csv):
     )
     assert "output_path" in out
     assert out["metrics"] is None
+
+
+@respx.mock(base_url="http://testserver")
+@pytest.mark.asyncio
+async def test_forecast_accepts_uppercase_model(respx_mock, sample_csv):
+    """El LLM emite model='SARIMAX' (mayúsculas): la tool lo normaliza, no revienta.
+
+    Reproduce el bug real: el Literal['sarimax'] rechazaba 'SARIMAX' con
+    literal_error y el agente entraba en bucle sin poder corregirlo."""
+    respx_mock.post("/Datos/Sarimax").mock(
+        return_value=httpx.Response(200, content=b"ts,p\n2024-01-21,1.0\n")
+    )
+    out = await forecast_time_series(
+        file_path=str(sample_csv), index_column="ts",
+        model="SARIMAX", forecast_steps=5, return_metrics=False, with_plot=False,
+    )
+    assert "output_path" in out
+    assert out["model_used"] == "sarimax"
+
+
+def test_normalize_model_accepts_case_and_quotes():
+    assert _normalize_model("SARIMAX") == "sarimax"
+    assert _normalize_model(" Sarimax ") == "sarimax"
+    assert _normalize_model("'sarimax'") == "sarimax"
+
+
+def test_normalize_model_rejects_unknown():
+    with pytest.raises(ValueError, match="no soportado"):
+        _normalize_model("prophet")
 
 
 def test_normalize_csv_daily_passthrough():

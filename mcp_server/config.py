@@ -23,12 +23,13 @@ def load_settings() -> ServerSettings:
     return ServerSettings(
         api_url=api_url,
         workspace_dir=workspace,
-        # 300s (5 min) por-request: /Datos/Sarimax entrena un grid search SARIMAX
+        # 600s (10 min) por-request: /Datos/Sarimax entrena un grid search SARIMAX
         # (14 órdenes × 3 estacionalidades) con backtesting refit POR CADA columna
         # numérica, y forecast_time_series lo dispara hasta 3 veces (Datos + Error +
-        # Plot). Con 60s una sola request multi-columna saltaba ReadTimeout mientras
-        # la API seguía calculando. Es timeout por-request de httpx, no acumulado.
-        request_timeout=float(os.getenv("DRIFT_API_TIMEOUT", "300")),
+        # Plot). Series largas o multi-columna pueden tardar varios minutos, así que
+        # subimos el margen (antes 300s saltaba ReadTimeout con la API aún calculando).
+        # Es timeout por-request de httpx, no acumulado. Ajustable con DRIFT_API_TIMEOUT.
+        request_timeout=float(os.getenv("DRIFT_API_TIMEOUT", "600")),
         connect_timeout=float(os.getenv("DRIFT_API_CONNECT_TIMEOUT", "5")),
         log_level=os.getenv("MCP_LOG_LEVEL", "INFO"),
     )

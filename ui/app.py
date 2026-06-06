@@ -450,32 +450,47 @@ def _publish_to_static(path: Path) -> str:
     return f"app/static/{path.name}"
 
 
-def _linkify_artifacts(text: str, artifacts: list[Path]) -> str:
-    """Convierte las menciones a ficheros generados en enlaces de descarga reales.
+_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
 
-    Por cada artefacto se publica una copia en el directorio estático y se
-    reescribe su aparición en la respuesta del agente —ya sea un enlace Markdown
-    muerto ``[nombre](ruta-local)`` o el nombre en texto plano— por un ancla HTML
-    ``<a href="app/static/<nombre>" download="<nombre>">`` que el navegador
-    descarga directamente al hacer clic (en vez de abrir el CSV/PNG en una
-    pestaña). Requiere renderizar con ``unsafe_allow_html=True``. Usa un centinela
-    intermedio para no re-enlazar el nombre que queda dentro de la propia URL.
+
+def _linkify_artifacts(text: str, artifacts: list[Path]) -> str:
+    """Limpia en la respuesta del agente las menciones a ficheros generados.
+
+    Por cada artefacto reescribe su aparición —imagen/enlace Markdown, ruta
+    absoluta (con o sin prefijo ``file:``) o nombre en texto plano— evitando que
+    quede colgando el prefijo de directorio interno (``/home/.../temp_uploads/``):
+
+    * Imágenes (PNG…): se ELIMINAN del texto. Ya se muestran inline con
+      ``st.image`` en ``_render_generated_artifacts``; además el agente las emitía
+      como ``![](file:/ruta/abs)``, que el navegador no carga (icono roto).
+    * Resto (CSV…): se sustituye por un ancla de descarga directa
+      ``<a href="app/static/<nombre>" download="<nombre>">`` con SOLO el nombre.
+
+    Requiere renderizar con ``unsafe_allow_html=True``. Usa un centinela
+    intermedio por índice (no contiene el nombre) para no re-tocar el resultado.
     """
     if not text or not artifacts:
         return text
     for i, p in enumerate(artifacts):
         name = p.name
-        url = _publish_to_static(p)
-        # Centinela por índice: NO contiene `name`, así el paso 2 no lo vuelve a
-        # tocar (evita anidar centinelas y dejar bytes nulos sueltos).
+        abs_path = str(p)
         sentinel = f"\x00{i}\x00"
-        # 1) Enlaces Markdown existentes con ese nombre como texto → centinela.
-        text = re.sub(r"\[" + re.escape(name) + r"\]\([^)]*\)", sentinel, text)
-        # 2) Menciones en texto plano restantes → centinela.
+        # 1) Imagen Markdown que referencia el artefacto (por nombre o ruta).
+        text = re.sub(r"!\[[^\]]*\]\([^)]*" + re.escape(name) + r"[^)]*\)", sentinel, text)
+        # 2) Enlace Markdown que lo referencia.
+        text = re.sub(r"\[[^\]]*\]\([^)]*" + re.escape(name) + r"[^)]*\)", sentinel, text)
+        # 3) Ruta absoluta (con o sin prefijo file:) y, por último, el nombre suelto.
+        text = text.replace("file:" + abs_path, sentinel)
+        text = text.replace(abs_path, sentinel)
         text = text.replace(name, sentinel)
-        # 3) Centinela → ancla de descarga directa (el atributo `download` fuerza
-        #    la descarga same-origin en vez de navegar al fichero).
-        text = text.replace(sentinel, f'<a href="{url}" download="{name}">{name}</a>')
+        # 4) Sustitución final: las imágenes se quitan (van por st.image); el resto
+        #    se convierte en ancla de descarga limpia (sin la ruta interna).
+        if p.suffix.lower() in _IMAGE_SUFFIXES:
+            replacement = ""
+        else:
+            url = _publish_to_static(p)
+            replacement = f'<a href="{url}" download="{name}">{name}</a>'
+        text = text.replace(sentinel, replacement)
     return text
 
 

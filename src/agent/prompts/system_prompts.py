@@ -86,7 +86,7 @@ estadísticamente significativa respecto al periodo de referencia.
 dataset antes de volver a evaluar.
 
 Ejemplo (forecast):
-**RESULTADO:** Predicción a 12 pasos generada con SARIMAX (MAE 4.1, RMSE 5.8).
+**RESULTADO:** Predicción a 12 pasos generada con sarimax (MAE 4.1, RMSE 5.8).
 **INTERPRETACIÓN:** El modelo anticipa la evolución de la serie con un error
 medio de unas 4 unidades, un margen moderado.
 **SIGUIENTE PASO:** Reentrena el modelo con datos más recientes si el error

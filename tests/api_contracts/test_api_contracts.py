@@ -160,21 +160,20 @@ async def test_augment_extends_csv(stable_csv_path: str):
 
 
 @pytest.mark.weight(10)
-async def test_exogenous_linear_adds_column(stable_csv_path: str):
-    """Relación lineal añade una columna nueva con el nombre solicitado."""
+async def test_exogenous_correlation_adds_column(stable_csv_path: str):
+    """La relación 'correlation' añade una columna nueva con el nombre solicitado."""
     out = await create_exogenous_variable(
         file_path=stable_csv_path,
         index_column="Indice",
-        new_column_name="valor_lineal",
-        relation="linear",
-        coefficients=[2.0, 3.0],
+        new_column_name="valor_correl",
+        relation="correlation",
     )
     assert "error" not in out, f"exogenous falló: {out.get('error')}"
-    assert out["new_column_name"] == "valor_lineal"
-    assert out["relation_used"] == "linear"
+    assert out["new_column_name"] == "valor_correl"
+    assert out["relation_used"] == "correlation"
 
     df = pd.read_csv(out["output_path"])
-    assert "valor_lineal" in df.columns, (
+    assert "valor_correl" in df.columns, (
         f"Columna nueva ausente en CSV. Columnas: {list(df.columns)}"
     )
 

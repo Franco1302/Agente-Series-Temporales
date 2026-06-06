@@ -51,7 +51,7 @@ HERRAMIENTAS:
    Triggers: "aumentar datos", "más observaciones", "ampliar dataset".
 
 7. create_exogenous_variable — Añade una nueva columna sintetica al CSV calculada a partir de las existentes.
-   Triggers: "variable exógena", "nueva columna", "PCA", "correlación".
+   Triggers: "variable exógena", "nueva columna", "correlación", "covarianza".
 
 8. forecast_time_series — Entrena un modelo predictivo y devuelve un horizonte de prediccion.
    Triggers: "predecir", "forecast", "futuro", "SARIMAX".

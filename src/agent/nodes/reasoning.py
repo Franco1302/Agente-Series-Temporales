@@ -449,7 +449,7 @@ _ACTION_INTENT_KEYWORDS: tuple[str, ...] = (
     "drift", "deriva", "ha cambiado", "estabilidad",
     "aument", "ampliar", "m[aá]s observaciones", "m[aá]s datos",
     "forecast", "predic", "predec", "pron[oó]stic", "sarimax", "futuro",
-    "detecta", "ex[oó]gena", "pca", "correlaci",
+    "detecta", "ex[oó]gena", "correlaci", "covar",
 )
 
 # Marcadores de pregunta teórica o de capacidades: si aparecen, NO forzamos
@@ -589,8 +589,7 @@ _AUGMENT_STRATEGY_NAMES: tuple[str, ...] = (
     "estrategia",
 )
 _EXOGENOUS_RELATION_NAMES: tuple[str, ...] = (
-    "pca", "principal", "correla", "covar", "lineal", "linear",
-    "polinom", "polynom", "relaci[oó]n",
+    "correla", "covar", "relaci[oó]n",
 )
 # Cualquier mención (a favor o en contra) de la gráfica/imagen. Es la evidencia
 # que habilita respetar el `with_plot` que emite el modelo: sin mención, el

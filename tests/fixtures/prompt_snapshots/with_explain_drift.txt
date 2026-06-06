@@ -51,7 +51,7 @@ HERRAMIENTAS:
    Triggers: "aumentar datos", "más observaciones", "ampliar dataset".
 
 7. create_exogenous_variable — Añade una nueva columna sintetica al CSV calculada a partir de las existentes.
-   Triggers: "variable exógena", "nueva columna", "PCA", "correlación".
+   Triggers: "variable exógena", "nueva columna", "correlación", "covarianza".
 
 8. forecast_time_series — Entrena un modelo predictivo y devuelve un horizonte de prediccion.
    Triggers: "predecir", "forecast", "futuro", "SARIMAX".
@@ -85,7 +85,7 @@ estadísticamente significativa respecto al periodo de referencia.
 dataset antes de volver a evaluar.
 
 Ejemplo (forecast):
-**RESULTADO:** Predicción a 12 pasos generada con SARIMAX (MAE 4.1, RMSE 5.8).
+**RESULTADO:** Predicción a 12 pasos generada con sarimax (MAE 4.1, RMSE 5.8).
 **INTERPRETACIÓN:** El modelo anticipa la evolución de la serie con un error
 medio de unas 4 unidades, un margen moderado.
 **SIGUIENTE PASO:** Reentrena el modelo con datos más recientes si el error

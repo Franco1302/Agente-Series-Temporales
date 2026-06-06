@@ -17,13 +17,10 @@ _SETTINGS = load_settings()
 
 _RELATION_TO_ENDPOINT: dict[str, str] = {
     # Mapea el tipo de relacion solicitado al endpoint del backend MCP.
-    # El backend expone rutas bajo /Variables/* y cada una implementa
-    # una tecnica distinta para crear la variable exogena.
-    "pca": "/Variables/PCA",
+    # Solo se exponen las relaciones que el backend calcula a partir de los datos
+    # (no requieren que el usuario pase coeficientes).
     "correlation": "/Variables/Correlacion",
     "covariance": "/Variables/Covarianza",
-    "linear": "/Variables/Lineal",
-    "polynomial": "/Variables/Polinomico",
 }
 
 
@@ -32,32 +29,17 @@ class CreateExogenousVariableInput(BaseModel):
     file_path: str
     index_column: str
     new_column_name: str
-    relation: Literal["pca", "correlation", "covariance", "linear", "polynomial"]
-    coefficients: Optional[list[float]] = None
+    relation: Literal["correlation", "covariance"]
     with_plot: bool = True
 
 
 def _build_query_params(inp: CreateExogenousVariableInput) -> dict:
-    """Construye los parametros que espera el backend segun la relacion.
+    """Construye los parametros que espera el backend.
 
-    - Base comun: indice y nombre de la nueva columna.
-    - Linear: requiere slope/intercept como `a` y `b`.
-    - Polynomial: lista de coeficientes en `a`.
-    - PCA/correlation/covariance: solo base comun.
+    Las dos relaciones (correlation, covariance) se calculan a partir de los
+    datos: solo necesitan el indice y el nombre de la nueva columna.
     """
-    base: dict = {"indice": inp.index_column, "columna": inp.new_column_name}
-    if inp.relation == "linear":
-        coefs = inp.coefficients or []
-        if len(coefs) < 2:
-            raise ValueError("relation='linear' requiere coefficients=[slope, intercept].")
-        return {**base, "a": coefs[0], "b": coefs[1]}
-    if inp.relation == "polynomial":
-        coefs = inp.coefficients or []
-        if not coefs:
-            raise ValueError("relation='polynomial' requiere coefficients=[c0,c1,...].")
-        return {**base, "a": coefs}
-    # pca, correlation, covariance: solo indice + columna
-    return base
+    return {"indice": inp.index_column, "columna": inp.new_column_name}
 
 
 @mcp.tool()
@@ -78,27 +60,15 @@ async def create_exogenous_variable(
         ),
     ],
     relation: Annotated[
-        Literal["pca", "correlation", "covariance", "linear", "polynomial"],
+        Literal["correlation", "covariance"],
         Field(
             description=(
-                "Tipo de relación: 'pca' = primera componente principal; "
-                "'correlation' = matriz de correlación; 'covariance' = covarianza; "
-                "'linear' = y=a·x+b (requiere coefficients=[slope, intercept]); "
-                "'polynomial' = combinación polinómica (requiere coefficients=[c0,c1,...])."
+                "Tipo de relación, calculada automáticamente a partir de los datos: "
+                "'correlation' = matriz de correlación; 'covariance' = covarianza."
             ),
             json_schema_extra={"evidence": "exogenous_relation"},
         ),
     ],
-    coefficients: Annotated[
-        Optional[list[float]],
-        Field(
-            description="Solo linear/polynomial: lista de coeficientes.",
-            json_schema_extra={
-                "tunable_if": {"relation": ["linear", "polynomial"]},
-                "default_note": "se calcularán automáticamente a partir de los datos",
-            },
-        ),
-    ] = None,
     with_plot: Annotated[
         bool,
         Field(
@@ -117,7 +87,7 @@ async def create_exogenous_variable(
         inp = CreateExogenousVariableInput(
             file_path=file_path, index_column=index_column,
             new_column_name=new_column_name, relation=relation,
-            coefficients=coefficients, with_plot=with_plot,
+            with_plot=with_plot,
         )
         endpoint = _RELATION_TO_ENDPOINT[inp.relation]
         params = _build_query_params(inp)
@@ -126,7 +96,6 @@ async def create_exogenous_variable(
         out_name = deterministic_filename(
             f"exogenous_{inp.relation}",
             Path(inp.file_path).stem, inp.index_column, inp.new_column_name,
-            str(inp.coefficients),
             ext="csv",
         )
 

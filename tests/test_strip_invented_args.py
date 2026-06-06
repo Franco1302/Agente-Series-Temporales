@@ -230,15 +230,15 @@ def test_keep_augment_strategy_when_user_says_duplicar():
 
 
 def test_strip_invented_exogenous_relation():
-    msg = _tool_call_msg("create_exogenous_variable", {"relation": "linear"})
+    msg = _tool_call_msg("create_exogenous_variable", {"relation": "covariance"})
     cleaned = _strip_invented_args(msg, _state("Crea una columna nueva."))
     assert "relation" not in _args_of(cleaned)
 
 
-def test_keep_exogenous_relation_when_user_says_pca():
-    msg = _tool_call_msg("create_exogenous_variable", {"relation": "pca"})
-    cleaned = _strip_invented_args(msg, _state("Usa PCA para crear la columna."))
-    assert _args_of(cleaned)["relation"] == "pca"
+def test_keep_exogenous_relation_when_user_says_covariance():
+    msg = _tool_call_msg("create_exogenous_variable", {"relation": "covariance"})
+    cleaned = _strip_invented_args(msg, _state("Usa covarianza para crear la columna."))
+    assert _args_of(cleaned)["relation"] == "covariance"
 
 
 # existing_column / new_column -----------------------------------------------

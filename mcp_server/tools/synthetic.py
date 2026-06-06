@@ -18,19 +18,9 @@ _SETTINGS = load_settings()
 
 _FREQ = Literal["B", "D", "W", "M", "Q", "Y", "h", "min", "s"]
 
-# Subconjunto CURADO de distribuciones que el agente expone. La API soporta
-# códigos 1..17, pero la capa MCP es un facade acotado: solo ofrecemos los que
-# documentamos. Restringir el tipo (en vez de `int` con `ge/le`) cierra el
-# contrato —lo aceptado == lo documentado— e impide colar las distribuciones no
-# curadas (5 hipergeométrica, 6 constante, 8 lognormal, 14 Pareto, 15/16 rampas).
+
 _DISTR = Literal[1, 2, 3, 4, 7, 9, 10, 11, 12, 13, 17]
 
-# Nº de parámetros que la API acepta en `params` por código de distribución
-# (contrato real, drift-detection/api/series_sinteticas/funciones_generales.py,
-# función `distribuciones`). Sin esta validación, pasar una aridad incorrecta
-# (p. ej. 1 solo valor a una Normal, que indexa params[0] y params[1]) provoca
-# un IndexError → 500 opaco en la API en vez de un mensaje accionable. Espejo de
-# `_TREND_PARAM_ARITY`.
 _DISTRIBUTION_PARAM_ARITY: dict[int, tuple[int, int]] = {
     1: (2, 2),   # Normal[mu, sigma]
     2: (2, 3),   # Binomial[n, p, (loc)]
