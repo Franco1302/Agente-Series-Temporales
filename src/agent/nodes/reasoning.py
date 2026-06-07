@@ -55,12 +55,6 @@ _JSON_TOOLCALL_RE = re.compile(
 def _coerce_text_toolcall(message: AIMessage) -> AIMessage:
     """Promueve una tool call emitida como JSON en `content` a `tool_calls`.
 
-    Algunos modelos cuantizados (p. ej. qwen2.5-coder q4) no respetan el
-    protocolo nativo de tool calling de Ollama y emiten el objeto
-    {"name": ..., "arguments": {...}} dentro de `content`. Este helper detecta
-    ese patrón, sintetiza un tool_call estándar y limpia el content para
-    que el resto del grafo (route_after_razonador, ToolNode) lo trate como
-    una tool call legítima.
     """
     if getattr(message, "tool_calls", None):
         return message
@@ -109,11 +103,7 @@ def _last_tool_message_name(messages: list) -> str | None:
 
 
 def _build_fuentes_section(messages: list) -> str | None:
-    """Extrae el bloque «Fuentes consultadas» del último ToolMessage de consultar_teoria.
-
-    Devuelve la sección ya formateada como «Fuentes:\\n- ...» lista para anexar,
-    o None si no se encuentra el bloque.
-    """
+    """Extrae el bloque «Fuentes consultadas» del último ToolMessage de consultar_teoria."""
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage) and getattr(msg, "name", None) == "consultar_teoria":
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
@@ -131,13 +121,7 @@ def _build_fuentes_section(messages: list) -> str | None:
 
 
 def _append_fuentes(response: AIMessage, messages: list) -> None:
-    """Anexa de forma determinista la sección Fuentes a la respuesta final.
-
-    La instrucción del prompt no basta con el modelo 3B local. Copiar las
-    fuentes del output de ``consultar_teoria`` garantiza la cita y evita que el
-    modelo invente referencias. No-op si la respuesta ya incluye la sección o
-    si no hay bloque de fuentes que citar.
-    """
+    """Anexa de forma determinista la sección Fuentes a la respuesta final."""
     content = response.content
     if not isinstance(content, str) or not content.strip():
         return
@@ -149,12 +133,7 @@ def _append_fuentes(response: AIMessage, messages: list) -> None:
 
 
 def _last_analytical_tool_message(messages: list) -> ToolMessage | None:
-    """Devuelve el último ToolMessage de una herramienta analítica, o None.
-
-    Replica la lógica de corte de `_last_tool_message_name`: si encuentra un
-    AIMessage de texto plano antes que un ToolMessage, el ciclo anterior ya
-    cerró y no se sigue buscando.
-    """
+    """Devuelve el último ToolMessage de una herramienta analítica, o None."""
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage):
             if getattr(msg, "name", None) in ANALYTICAL_TOOL_NAMES:
@@ -166,12 +145,7 @@ def _last_analytical_tool_message(messages: list) -> ToolMessage | None:
 
 
 def _extract_must_cite_facts(tool_msg: ToolMessage) -> list[str]:
-    """Extrae del ToolMessage los valores deterministas que deben aparecer citados.
-
-    El contenido ya es JSON (lo reescribe `_parse_tool_payload`). Solo se
-    recogen valores string o entero; cualquier fallo de parseo devuelve una
-    lista vacía para no romper el flujo.
-    """
+    """Extrae del ToolMessage los valores deterministas que deben aparecer citados."""
     try:
         raw = tool_msg.content
         data = json.loads(raw) if isinstance(raw, str) else raw
@@ -271,7 +245,7 @@ def _verify_and_repair(response: AIMessage, messages: list) -> AIMessage:
 # ACTIVO del prompt suministra la ruta de forma legítima desde el estado.
 
 
-# ── Patrones de evidencia textual ───────────────────────────────────────────
+# Patrones de evidencia textual 
 
 _DATE_EVIDENCE_RE = re.compile(
     r"\b(?:19|20)\d{2}\b"
@@ -331,13 +305,7 @@ _DELEGATION_KEYWORDS: tuple[str, ...] = (
 
 
 def _user_delegates(user_text: str) -> bool:
-    """True si el usuario delegó explícitamente la elección de algún valor.
-
-    No intentamos identificar a qué campo se refiere la delegación: si la
-    palabra aparece en el historial, asumimos que el usuario quiere que el
-    LLM proponga valores sensatos. Es preferible un ejecución con valores
-    razonables a un bucle de preguntas.
-    """
+    """True si el usuario delegó explícitamente la elección de algún valor."""
     return _has_any_keyword(user_text, _DELEGATION_KEYWORDS)
 
 
@@ -345,15 +313,7 @@ def _build_delegation_directive(
     pending_tool: str | None,
     missing: list[str],
 ) -> SystemMessage:
-    """Directiva que se inyecta al LLM cuando el usuario delega.
-
-    El objetivo NO es construir la tool call por código, sino forzar al LLM a
-    invocar la herramienta razonando y proponiendo él mismo los valores. Con
-    qwen cuantizado, sin este empujón explícito el modelo tiende a pedir
-    aclaraciones en texto plano incluso después de "usa los defaults" — la
-    directiva le indica que está autorizado a decidir y que debe emitir el
-    JSON ya.
-    """
+    """Directiva que se inyecta al LLM cuando el usuario delega."""
     if pending_tool and missing:
         body = (
             f"El usuario acaba de delegar explícitamente la elección de los "

@@ -19,12 +19,7 @@ from src.agent.tools import AGENT_TOOLS
 
 
 def _derive_required_from_schema(tool) -> list[str]:
-    """Lee el schema Pydantic de la tool y devuelve los parámetros sin default.
-
-    Pydantic v2 expone `model_fields[name].is_required()` para distinguir los
-    obligatorios. Cuando el schema es un dict (JSON Schema crudo), usamos su
-    clave `required`. Si la tool no expone schema (caso raro), devolvemos [].
-    """
+    """Lee el schema Pydantic de la tool y devuelve los parámetros sin default."""
     schema = getattr(tool, "args_schema", None)
     if schema is None:
         return []
@@ -37,13 +32,7 @@ def _derive_required_from_schema(tool) -> list[str]:
 
 @lru_cache(maxsize=1)
 def _build_required_map() -> dict[str, list[str]]:
-    """Construye el mapa tool_name → required leyendo `AGENT_TOOLS` una sola vez.
-
-    La fuente de verdad pasa a ser el schema de cada tool MCP/LC. Si alguien
-    añade o quita un parámetro obligatorio en `mcp_server/tools/`, el agente
-    lo detecta automáticamente sin tocar este módulo. Eliminamos así el riesgo
-    de "drift" entre el dict hand-coded y la firma real de la API.
-    """
+    """Construye el mapa tool_name → required leyendo `AGENT_TOOLS` una sola vez."""
     return {t.name: _derive_required_from_schema(t) for t in AGENT_TOOLS}
 
 
@@ -75,13 +64,7 @@ def _get_tool(tool_name: str):
 
 
 def _iter_properties(tool) -> dict[str, dict]:
-    """Normaliza el schema de la tool a `{param: {description, default, enum, type}}`.
-
-    Soporta los dos formatos que conviven en AGENT_TOOLS:
-      * tools MCP: `args_schema` es un dict JSON Schema crudo.
-      * tools LangChain locales (consultar_teoria): `args_schema` es un
-        Pydantic BaseModel con `model_fields`.
-    """
+    """Normaliza el schema de la tool a `{param: {description, default, enum, type}}`."""
     if tool is None:
         return {}
     schema = getattr(tool, "args_schema", None)

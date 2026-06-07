@@ -1,0 +1,7 @@
+run_id,model,temperature,commit,case_type,n_runs,n_must_ask,n_not_must_ask,invention_rate,correct_ask_rate,over_ask_rate,routing_accuracy,mean_duration_s
+qwen2.5_3b-instruct-q8_0-1780825721,qwen2.5:3b-instruct-q8_0,0.0,91b7deb,missing_param,20,20,0,0.0,0.25,,0.25,2.06
+qwen2.5_3b-instruct-q8_0-1780825721,qwen2.5:3b-instruct-q8_0,0.0,91b7deb,ambiguous_tool,20,20,0,0.0,0.5,,0.5,1.85
+qwen2.5_3b-instruct-q8_0-1780825721,qwen2.5:3b-instruct-q8_0,0.0,91b7deb,theory_vs_op,15,0,15,0.0,,0.0,0.6667,9.12
+qwen2.5_3b-instruct-q8_0-1780825721,qwen2.5:3b-instruct-q8_0,0.0,91b7deb,out_of_scope,10,0,10,0.0,,0.0,1.0,1.51
+qwen2.5_3b-instruct-q8_0-1780825721,qwen2.5:3b-instruct-q8_0,0.0,91b7deb,implicit_context,10,0,10,0.0,,0.0,1.0,18.39
+qwen2.5_3b-instruct-q8_0-1780825721,qwen2.5:3b-instruct-q8_0,0.0,91b7deb,total,75,40,35,0.0,0.375,0.0,0.6,5.52
