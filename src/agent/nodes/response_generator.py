@@ -39,13 +39,10 @@ def generar_respuesta_node(state: AgentState) -> dict:
     response = llm.invoke(messages)
     duration_ms = (time.perf_counter() - t0) * 1000.0
 
-    # generar_respuesta no usa _coerce_text_toolcall: el LLM ya está sin
-    # tools enlazadas, así que coerce_fired siempre quedará en False.
     emit_llm_call(
         name="generar_respuesta.llm",
         messages=messages,
-        response_raw=response,
-        response_final=None,
+        response=response,
         duration_ms=duration_ms,
     )
 

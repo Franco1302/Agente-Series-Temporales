@@ -2,8 +2,8 @@
 
 Los campos extraídos siguen el esquema definido en el plan:
 ``model``, ``n_messages_in``, ``prompt_chars``, ``input_tokens``,
-``output_tokens``, ``tokens_per_sec``, ``decided``, ``tool_name``,
-``coerce_fired``. Cuando alguno no se puede obtener (p. ej. el modelo
+``output_tokens``, ``tokens_per_sec``, ``decided``, ``tool_name``.
+Cuando alguno no se puede obtener (p. ej. el modelo
 local no rellena ``response_metadata`` o falla la división por
 ``eval_duration=0``) se devuelve ``None`` en lugar de propagar la
 excepción.
@@ -61,8 +61,7 @@ def _extract_first_tool_name(response: Any) -> Optional[str]:
 def extract_llm_attributes(
     *,
     messages: list,
-    response_raw: Any,
-    response_final: Optional[Any] = None,
+    response: Any,
     model: Optional[str] = None,
 ) -> dict[str, Any]:
     """Construye el diccionario ``attributes`` de un evento ``llm_call``.
@@ -70,29 +69,17 @@ def extract_llm_attributes(
     Parámetros:
         messages: Lista pasada a ``llm.invoke(messages)``. Se usa para
             ``n_messages_in`` y ``prompt_chars``.
-        response_raw: Respuesta cruda del LLM, antes de cualquier
-            post-procesado tipo ``_coerce_text_toolcall``.
-        response_final: Respuesta tras el parser de fallback. Si es
-            ``None`` se asume que no hubo coerción y, en consecuencia,
-            ``coerce_fired = False``.
+        response: Respuesta del LLM.
         model: Nombre del modelo (informativo). Si es ``None`` se intenta
             extraer del ``response_metadata`` del LLM.
 
     Retorno:
         Diccionario con las claves esperadas por el evento ``llm_call``.
     """
-    if response_final is None:
-        response_final = response_raw
-        coerce_applicable = False
-    else:
-        coerce_applicable = True
+    has_tool_calls = bool(getattr(response, "tool_calls", None) or [])
 
-    had_native = bool(getattr(response_raw, "tool_calls", None) or [])
-    has_final = bool(getattr(response_final, "tool_calls", None) or [])
-    coerce_fired = coerce_applicable and (not had_native) and has_final
-
-    usage = getattr(response_final, "usage_metadata", None)
-    meta = getattr(response_final, "response_metadata", None) or {}
+    usage = getattr(response, "usage_metadata", None)
+    meta = getattr(response, "response_metadata", None) or {}
 
     input_tokens = _safe_get(usage, "input_tokens")
     output_tokens = _safe_get(usage, "output_tokens")
@@ -106,8 +93,8 @@ def extract_llm_attributes(
         except (ZeroDivisionError, TypeError, ValueError):
             tokens_per_sec = None
 
-    decided = "tool_call" if has_final else "text"
-    tool_name = _extract_first_tool_name(response_final)
+    decided = "tool_call" if has_tool_calls else "text"
+    tool_name = _extract_first_tool_name(response)
 
     if model is None:
         model = _safe_get(meta, "model")
@@ -121,7 +108,6 @@ def extract_llm_attributes(
         "tokens_per_sec": tokens_per_sec,
         "decided": decided,
         "tool_name": tool_name,
-        "coerce_fired": coerce_fired,
     }
 
 
@@ -129,8 +115,7 @@ def emit_llm_call(
     *,
     name: str,
     messages: list,
-    response_raw: Any,
-    response_final: Optional[Any] = None,
+    response: Any,
     duration_ms: float,
     model: Optional[str] = None,
 ) -> None:
@@ -146,8 +131,7 @@ def emit_llm_call(
         return
     attributes = extract_llm_attributes(
         messages=messages,
-        response_raw=response_raw,
-        response_final=response_final,
+        response=response,
         model=model,
     )
     emit(

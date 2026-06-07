@@ -46,49 +46,6 @@ for _t in AGENT_TOOLS:
         _TOOL_ACCEPTED_PARAMS[_t.name] = frozenset((_schema.get("properties") or {}).keys())
     else:
         _TOOL_ACCEPTED_PARAMS[_t.name] = frozenset()
-_JSON_TOOLCALL_RE = re.compile(
-    r'\{[^{}]*"name"\s*:\s*"(?P<name>[\w\-]+)"[^{}]*"(?:arguments|args|parameters)"\s*:\s*(?P<args>\{.*?\})\s*\}',
-    re.DOTALL,
-)
-
-
-def _coerce_text_toolcall(message: AIMessage) -> AIMessage:
-    """Promueve una tool call emitida como JSON en `content` a `tool_calls`.
-
-    """
-    if getattr(message, "tool_calls", None):
-        return message
-
-    content = message.content
-    if not isinstance(content, str) or "name" not in content:
-        return message
-
-    for match in _JSON_TOOLCALL_RE.finditer(content):
-        name = match.group("name")
-        if name not in _KNOWN_TOOL_NAMES:
-            continue
-        try:
-            args = json.loads(match.group("args"))
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(args, dict):
-            continue
-
-        synthetic_call = {
-            "name": name,
-            "args": args,
-            "id": f"call_{uuid.uuid4().hex[:12]}",
-            "type": "tool_call",
-        }
-        return AIMessage(
-            content="",
-            tool_calls=[synthetic_call],
-            additional_kwargs=getattr(message, "additional_kwargs", {}) or {},
-        )
-
-    return message
-
-
 def _last_tool_message_name(messages: list) -> str | None:
     """Devuelve el nombre del último ToolMessage del historial, o None."""
     for msg in reversed(messages):
@@ -209,8 +166,7 @@ def _verify_and_repair(response: AIMessage, messages: list) -> AIMessage:
         emit_llm_call(
             name="razonador.fidelidad_retry",
             messages=messages + [correccion],
-            response_raw=retry,
-            response_final=retry,
+            response=retry,
             duration_ms=duration_ms,
         )
 
@@ -1282,7 +1238,7 @@ def razonador_node(state: AgentState) -> dict:
     t0 = time.perf_counter()
     raw_response = llm.invoke(messages)
     duration_ms = (time.perf_counter() - t0) * 1000.0
-    response = _coerce_text_toolcall(raw_response)
+    response = raw_response
 
     # Red de seguridad: si el modelo respondió en PROSA a una petición de acción
     # clara (y no estamos sintetizando tras una tool ni en mitad de una recogida
@@ -1299,12 +1255,11 @@ def razonador_node(state: AgentState) -> dict:
         compact = [messages[0], HumanMessage(content=last_human_text), _build_action_directive()]
         t_force = time.perf_counter()
         forced_raw = forced_llm.invoke(compact)
-        forced = _coerce_text_toolcall(forced_raw)
+        forced = forced_raw
         emit_llm_call(
             name="razonador.force_action_retry",
             messages=compact,
-            response_raw=forced_raw,
-            response_final=forced,
+            response=forced,
             duration_ms=(time.perf_counter() - t_force) * 1000.0,
         )
         if getattr(forced, "tool_calls", None):
@@ -1356,8 +1311,7 @@ def razonador_node(state: AgentState) -> dict:
     emit_llm_call(
         name="razonador.llm",
         messages=messages,
-        response_raw=raw_response,
-        response_final=response,
+        response=response,
         duration_ms=duration_ms,
     )
 
