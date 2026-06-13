@@ -28,14 +28,7 @@ _METHOD_TO_ENDPOINT: dict[str, str] = {
 _DEFAULT_THRESHOLDS: dict[str, float] = {"KS": 0.05, "JS": 0.2, "PSI": 0.25, "CUSUM": 1.5}
 
 
-# Schema interno usado por _build_query_params y los tests unitarios. NO se expone al LLM
-# (la tool MCP recibe params planos para que el JSON Schema sea plano).
-#
-# Los defaults de los parámetros condicionales viven aquí (y en la firma de la
-# tool, que es lo que ve el LLM), NO en el cuerpo de _build_query_params: así el
-# agente los deriva del schema sin duplicar una tabla a mano. `threshold` es la
-# excepción: su default depende del método (ver `_DEFAULT_THRESHOLDS`), algo que
-# un único `Field(default=…)` no puede expresar, así que se resuelve aquí.
+# Schema interno usado por _build_query_params y los tests unitarios. NO se expone al LLM.
 class DetectDriftInput(BaseModel):
     file_path: str
     index_column: str
@@ -50,10 +43,6 @@ class DetectDriftInput(BaseModel):
 
 
 def _build_query_params(inp: DetectDriftInput) -> dict:
-    """Traduce el schema Pydantic a los query params específicos del endpoint."""
-    # `inicio` solo lo declaran los endpoints univariantes/secuenciales
-    # (/Deteccion/{KS,JS,PSI,CUSUM}). MEWMA y HOTELLING no lo aceptan, así que
-    # no lo añadimos en esa rama para no enviar un query param muerto.
     params: dict[str, object] = {"indice": inp.index_column}
     threshold = inp.threshold if inp.threshold is not None else _DEFAULT_THRESHOLDS.get(inp.method)
 
@@ -82,26 +71,9 @@ def _build_query_params(inp: DetectDriftInput) -> dict:
 
 
 def _validate_multivariate(content: bytes, index_column: str) -> Optional[str]:
-    """Valida que el CSV es apto para un método multivariante (MEWMA/HOTELLING).
-
-    Estos métodos estiman e invierten una matriz de covarianza, así que
-    necesitan al menos dos columnas numéricas con varianza no nula. Si el
-    dataset no cumple, la API responde con un 500 opaco
-    (`numpy.linalg.LinAlgError: Singular matrix`); este chequeo previo lo
-    convierte en un mensaje accionable que el agente ReAct puede usar
-    para reintentar con otro método.
-
-    Parámetros:
-        content: Bytes del CSV (los mismos que se envían a la API).
-        index_column: Columna índice, que se excluye de las features.
-
-    Retorno:
-        Un mensaje de error si el dataset no es apto, o ``None`` si lo es.
-    """
     try:
         df = pd.read_csv(io.BytesIO(content))
     except Exception:  # noqa: BLE001
-        # No bloqueamos por un fallo de parseo: que sea la API quien decida.
         return None
 
     features = df.drop(columns=[index_column], errors="ignore")
@@ -157,11 +129,6 @@ async def detect_drift(
         int,
         Field(
             description="Índice desde el que empezar el análisis.",
-            # Invent-prone: el modelo tiende a rellenarlo con un número del
-            # contexto (p. ej. 200) aunque el usuario no lo pida, y un `inicio`
-            # mayor que el punto de corte interno deja la ventana de referencia
-            # vacía → 500 en la API. Con `evidence: integer`, si el usuario no
-            # escribió ningún número se descarta y cae al default seguro (1).
             json_schema_extra={"evidence": "integer"},
         ),
     ] = 1,
@@ -230,9 +197,6 @@ async def detect_drift(
         params = _build_query_params(inp)
         filename, content, mime = open_csv_for_upload(inp.file_path)
 
-        # Los métodos multivariantes invierten una matriz de covarianza:
-        # validamos la dimensionalidad antes de llamar a la API para evitar
-        # un 500 opaco (LinAlgError: Singular matrix) y devolver un mensaje útil.
         if inp.method in {"MEWMA", "HOTELLING"}:
             problema = _validate_multivariate(content, inp.index_column)
             if problema is not None:
@@ -250,7 +214,6 @@ async def detect_drift(
         drift_label = body.get("Drift", "Desconocido")
         report = body.get("reporte", {})
 
-        # Construimos la respuesta feliz y la envolvemos para adjuntar la telemetría recolectada
         result = {
             "drift_detected": drift_label == "Detectado",
             "drift_label": drift_label,

@@ -6,10 +6,8 @@ import time
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.agent.state import AgentState
-# Importamos la herramienta y su extractor lateral de contexto seguro
 from src.tools.rag_tool import consultar_teoria, pop_last_retrieval
 
-# Componentes de la infraestructura analítica del sistema
 from src.observability.context import get_current_span, get_thread_id, get_trace_id, new_span_id
 from src.observability.events import EVENT_RAG_RETRIEVAL, TraceEvent
 from src.observability.logger import emit, is_enabled
@@ -64,22 +62,16 @@ def recuperar_contexto_node(state: AgentState) -> dict:
 
     t0 = time.perf_counter()
 
-    # Invocación real síncrona de la herramienta RAG documental. Capturamos
-    # cualquier excepción para no dejar nunca huérfana la tool call de
-    # consultar_teoria: el grafo enruta recuperar_contexto → razonador de forma
-    # incondicional, así que un fallo debe convertirse igualmente en un
-    # ToolMessage (con el texto del error) que el razonador pueda explicar.
+    # Capturamos cualquier excepción para no dejar huérfana la tool call: el fallo se devuelve como ToolMessage.
     try:
         result = consultar_teoria.invoke({"query": query_text})
-    except Exception as exc:  # noqa: BLE001 — el fallo se reporta como ToolMessage
+    except Exception as exc:  # noqa: BLE001
         result = f"Error: Falló la consulta a la base teórica. Detalle técnico: {exc}"
 
     duration_ms = (time.perf_counter() - t0) * 1000.0
 
-    # Extraemos de forma limpia las métricas del RAG (Scores, Chunks, Inner Tokens)
     rag_metrics = pop_last_retrieval()
 
-    # Si la observabilidad está activa y se recuperaron métricas, disparamos el evento local
     if is_enabled() and rag_metrics:
         emit(
             TraceEvent(
@@ -94,12 +86,7 @@ def recuperar_contexto_node(state: AgentState) -> dict:
             )
         )
 
-    # Siempre devolvemos un ToolMessage —también cuando `result` empieza por
-    # "Error:"— para preservar la invariante "toda tool call tiene su respuesta".
-    # Antes, un fallo devolvía {"error_info": ...} que la arista incondicional
-    # recuperar_contexto → razonador nunca enrutaba a gestionar_error, y dejaba
-    # la tool call sin ToolMessage asociado. El razonador sintetiza ahora una
-    # explicación honesta del fallo a partir de este mensaje.
+    # Siempre devolvemos un ToolMessage (también en error) para preservar la invariante "toda tool call tiene respuesta".
     return {
         "messages": [
             ToolMessage(

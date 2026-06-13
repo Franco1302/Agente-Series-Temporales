@@ -39,17 +39,6 @@ class AugmentTimeSeriesInput(BaseModel):
 
 
 def _restore_index_label(content: bytes, index_column: str) -> bytes:
-    """Devuelve el CSV con la columna índice renombrada al nombre original.
-
-    La API escribe SIEMPRE el CSV con ``index_label="Indice"`` (hardcodeado en
-    todos sus endpoints), así que un CSV con índice 'indice' sale como 'Indice'.
-    Eso rompe el encadenado del caso 3: el agente aumenta y luego predice el
-    fichero reusando el ``index_column`` original ('indice') que ya no existe en
-    la salida → 400 Bad Request en /Datos/Sarimax. Reescribimos solo el primer
-    campo del header (el índice siempre es la primera columna) para que el
-    fichero aumentado conserve el esquema de entrada. Best-effort: ante cualquier
-    problema devolvemos el contenido sin tocar.
-    """
     if index_column == "Indice":
         return content
     try:
@@ -67,15 +56,6 @@ def _restore_index_label(content: bytes, index_column: str) -> bytes:
 
 
 def _build_query_params(inp: AugmentTimeSeriesInput) -> dict:
-    """Construye los parametros esperados por el backend segun la estrategia.
-
-    - Siempre incluye el indice y la frecuencia para alinear el eje temporal.
-    - Algunas estrategias reciben `size` directamente (normal, muller, harmonic).
-    - Otras usan nombres distintos (duplicate: factores de ruido; statistical: tipo).
-
-    Los defaults de los parámetros condicionales viven en el schema (modelo y
-    firma de la tool), no aquí: el agente los deriva sin duplicar una tabla.
-    """
     base = {"indice": inp.index_column, "freq": inp.frequency}
     if inp.strategy in {"normal", "muller", "harmonic"}:
         return {**base, "size": inp.size}

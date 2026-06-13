@@ -1,19 +1,9 @@
 """Motor de ingesta RAG local multi-documento con preservacion semantica.
 
-Flujo implementado:
-1. Carga de configuracion desde .env (OLLAMA_BASE_URL).
-2. Recorrido de todos los .pdf y .md de data/knowledge_base/ (PDF a Markdown
-   via pymupdf4llm; .md leido directo).
-3. Segmentacion semantica por encabezados Markdown (#, ##, ###).
-4. Segmentacion por tamano con solapamiento para mejorar recuperacion.
-5. Generacion de embeddings con Ollama (nomic-embed-text).
-6. Persistencia de vectores en Chroma en ./data/vector_db.
-
-Idempotencia: la ingesta es de tipo "recrear". Al inicio de run_ingestion se
-borra por completo data/vector_db/ (si existe) y se reconstruye desde cero. Es
-la estrategia mas simple y segura para un corpus pequeno: evita duplicados y
-deja la coleccion siempre consistente con el contenido actual de
-data/knowledge_base/.
+Recorre los .pdf y .md de data/knowledge_base/ (PDF a Markdown via pymupdf4llm),
+segmenta por encabezados Markdown y por tamano con solapamiento, genera embeddings
+con Ollama (nomic-embed-text) y persiste en Chroma. Idempotente de tipo "recrear":
+borra y reconstruye data/vector_db/ en cada ejecucion para evitar duplicados.
 """
 
 from __future__ import annotations
@@ -37,8 +27,7 @@ KNOWLEDGE_BASE_DIR = PROJECT_ROOT / "data" / "knowledge_base"
 VECTOR_DB_DIR = PROJECT_ROOT / "data" / "vector_db"
 EMBEDDING_MODEL = "nomic-embed-text"
 
-# Heuristica de clasificacion por nombre de fichero. La guia de seleccion
-# aporta criterios de DECISION; el resto del corpus describe teoria.
+# Clasificacion por nombre de fichero: la guia de seleccion aporta criterios de DECISION; el resto del corpus es teoria.
 GUIA_DECISION_FILENAME = "guia_seleccion_metodos.md"
 
 
@@ -87,12 +76,7 @@ def _extract_markdown(doc_path: Path) -> str:
 
 
 def _split_markdown(markdown_text: str, source_name: str) -> list[Document]:
-    """Realiza split semantico por encabezados y split recursivo por tamaño.
-
-    Enriquece cada chunk con metadata de trazabilidad: 'source', 'doc_type'
-    (clasificacion por nombre de fichero) y 'chunk_id' unico por documento
-    (prefijado con el nombre del fichero para evitar colisiones entre docs).
-    """
+    """Split semantico por encabezados + recursivo por tamano; enriquece cada chunk con metadata de trazabilidad (source, doc_type, chunk_id unico por documento)."""
     headers_to_split_on = [
         ("#", "header_1"),
         ("##", "header_2"),
@@ -116,8 +100,7 @@ def _split_markdown(markdown_text: str, source_name: str) -> list[Document]:
         )
 
     doc_type = _classify_doc_type(source_name)
-    # chunk_id unico por documento: prefijo con el nombre de fichero evita
-    # colisiones cuando varios documentos se ingieren a la misma coleccion.
+    # chunk_id unico por documento: el prefijo con el nombre de fichero evita colisiones entre documentos de la misma coleccion.
     for idx, doc in enumerate(chunked_documents, start=1):
         doc.metadata["source"] = source_name
         doc.metadata["doc_type"] = doc_type
@@ -151,12 +134,7 @@ def run_ingestion(
     knowledge_base_dir: Path = KNOWLEDGE_BASE_DIR,
     vector_db_dir: Path = VECTOR_DB_DIR,
 ) -> None:
-    """Ejecuta la ingesta completa de la base de conocimiento hacia Chroma.
-
-    Estrategia idempotente de tipo "recrear": borra vector_db_dir si existe y
-    reconstruye la coleccion desde cero a partir de todos los .pdf y .md de
-    knowledge_base_dir (.gitkeep y otros formatos se ignoran).
-    """
+    """Ejecuta la ingesta completa hacia Chroma; idempotente de tipo "recrear": borra vector_db_dir y reconstruye la coleccion desde todos los .pdf y .md de knowledge_base_dir."""
     ollama_base_url = _load_ollama_base_url(PROJECT_ROOT)
     document_paths = _discover_documents(knowledge_base_dir)
 

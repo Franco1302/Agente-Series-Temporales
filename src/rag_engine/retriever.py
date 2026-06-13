@@ -15,8 +15,7 @@ ENV_FILE = PROJECT_ROOT / ".env"
 VECTOR_DB_DIR = PROJECT_ROOT / "data" / "vector_db"
 EMBEDDING_MODEL = "nomic-embed-text"
 
-# Defaults sensatos: si no
-# se configura nada en .env el comportamiento es identico al historico.
+# Defaults sensatos: sin nada configurado en .env el comportamiento es identico al historico.
 DEFAULT_SEARCH_TYPE = "similarity"
 DEFAULT_FETCH_K = 20
 DEFAULT_MMR_LAMBDA = 0.5
@@ -104,11 +103,7 @@ def get_retriever(top_k: int = 4) -> VectorStoreRetriever:
     )
 
 def get_vector_store() -> Chroma:
-    """Devuelve la instancia nativa de la base de datos Chroma en modo lectura.
-
-    Permite al subsistema de observabilidad ejecutar búsquedas complejas
-    conservando los scores de distancia vectorial para la memoria del TFG.
-    """
+    """Devuelve la instancia nativa de Chroma en modo lectura (permite a la observabilidad ejecutar busquedas conservando los scores de distancia vectorial)."""
     _ensure_vector_db_ready(VECTOR_DB_DIR)
     ollama_base_url = _load_ollama_base_url()
 

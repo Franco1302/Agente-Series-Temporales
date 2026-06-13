@@ -1,8 +1,4 @@
-"""Pruebas basicas de calidad para el flujo RAG.
-
-Uso:
-    /home/franco/Documentos/TFG/.venv/bin/python src/rag_engine/rag_quality_check.py
-"""
+"""Pruebas basicas de calidad para el flujo RAG (ejecutar: .venv/bin/python src/rag_engine/rag_quality_check.py)."""
 
 from __future__ import annotations
 

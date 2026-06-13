@@ -1,11 +1,4 @@
-"""Nodo de recogida guiada de parámetros para herramientas incompletas.
-
-Cubre dos casos:
-  * Parámetros OBLIGATORIOS ausentes → pregunta directa por cada uno.
-  * Parámetros OPCIONALES "tunables" ausentes (umbrales, bins, coeficientes…)
-    → confirmación al usuario con los valores por defecto listados, para
-    evitar ejecutar la API con valores que el usuario no eligió.
-"""
+"""Nodo de recogida guiada de parámetros: pide los obligatorios ausentes y confirma los opcionales (tunables) antes de ejecutar."""
 
 from __future__ import annotations
 
@@ -32,27 +25,13 @@ def _derive_required_from_schema(tool) -> list[str]:
 
 @lru_cache(maxsize=1)
 def _build_required_map() -> dict[str, list[str]]:
-    """Construye el mapa tool_name → required leyendo `AGENT_TOOLS` una sola vez."""
+    """Construye el mapa tool_name → required leyendo AGENT_TOOLS una sola vez."""
     return {t.name: _derive_required_from_schema(t) for t in AGENT_TOOLS}
 
 
-# Compatibilidad: `TOOL_REQUIRED_PARAMS` sigue exponiéndose para llamadores
-# externos (tests, scripts) pero su contenido se deriva automáticamente.
+# Se expone para llamadores externos (tests, scripts) pero su contenido se deriva del schema.
 TOOL_REQUIRED_PARAMS: dict[str, list[str]] = _build_required_map()
 
-
-# Los grupos "alternativos" (XOR) viven en este módulo como
-# ``TOOL_ALTERNATIVE_GROUPS``, derivados del schema vía
-# ``_build_alternative_groups_map`` (ver más abajo, justo después de
-# ``_iter_properties``).
-
-
-# ── Lectura del schema de la tool (descripciones, defaults, enums) ──────────
-#
-# Antes había un dict `_PARAM_DESCRIPTIONS` (y otro `_OPTIONAL_PARAM_INFO` con
-# defaults) que repetía a mano lo que cada tool MCP ya declara en su
-# `Field(description=…, default=…)`. Esa duplicación había generado bugs por
-# desincronización. Ahora se lee directamente del schema de cada tool.
 
 @lru_cache(maxsize=1)
 def _tools_by_name() -> dict[str, object]:
@@ -64,7 +43,7 @@ def _get_tool(tool_name: str):
 
 
 def _iter_properties(tool) -> dict[str, dict]:
-    """Normaliza el schema de la tool a `{param: {description, default, enum, type}}`."""
+    """Normaliza el schema de la tool a {param: {description, default, enum, type}}."""
     if tool is None:
         return {}
     schema = getattr(tool, "args_schema", None)
@@ -82,9 +61,7 @@ def _iter_properties(tool) -> dict[str, dict]:
             default = getattr(field, "default", PydanticUndefined)
             if default is not PydanticUndefined:
                 entry["default"] = default
-            # Propaga claves del json_schema_extra (oneof_group, etc.) para que
-            # los consumidores del agente lo lean del mismo `_iter_properties`
-            # tanto si la tool es MCP (dict crudo) como Pydantic (BaseModel).
+            # Propaga las claves de json_schema_extra (oneof_group, etc.) tanto para tools MCP como Pydantic.
             extra = getattr(field, "json_schema_extra", None)
             if isinstance(extra, dict):
                 for k, v in extra.items():
@@ -94,20 +71,10 @@ def _iter_properties(tool) -> dict[str, dict]:
     return {}
 
 
-# ── Grupos "alternativos" (XOR) derivados del schema ────────────────────────
-#
-# Fuente de verdad: cada parámetro miembro de un grupo "uno-de" se declara con
-# ``Field(json_schema_extra={"oneof_group": "<nombre>"})`` en su tool MCP. El
-# nombre del grupo agrupa los miembros entre sí dentro del mismo tool; un tool
-# puede declarar varios grupos (ej. "horizon", "scale", …). El agente lee este
-# metadato del JSON Schema vía ``_iter_properties`` y construye el mapa
-# automáticamente: añadir un grupo XOR nuevo en cualquier tool MCP no
-# requiere tocar este módulo.
-
-
+# Grupos XOR derivados del schema: cada miembro se declara con Field(json_schema_extra={"oneof_group": "<nombre>"}).
 @lru_cache(maxsize=1)
 def _build_alternative_groups_map() -> dict[str, list[list[str]]]:
-    """Construye ``tool_name -> [[param, …], …]`` leyendo ``oneof_group`` del schema."""
+    """Construye tool_name -> [[param, …], …] leyendo oneof_group del schema."""
     result: dict[str, list[list[str]]] = {}
     for tool in AGENT_TOOLS:
         groups: dict[str, list[str]] = {}
@@ -115,16 +82,14 @@ def _build_alternative_groups_map() -> dict[str, list[list[str]]]:
             grp = info.get("oneof_group") if isinstance(info, dict) else None
             if isinstance(grp, str) and grp:
                 groups.setdefault(grp, []).append(name)
-        # Orden alfabético dentro de cada grupo: la salida es estable y no
-        # depende del orden de definición de los Field en la tool MCP.
+        # Orden alfabético dentro de cada grupo para una salida estable.
         non_trivial = [sorted(members) for members in groups.values() if len(members) >= 2]
         if non_trivial:
             result[tool.name] = sorted(non_trivial)
     return result
 
 
-# Compatibilidad: la constante sigue exponiéndose para tests/scripts externos,
-# pero su contenido viene del schema MCP (no se mantiene a mano).
+# Se expone para tests/scripts externos, pero su contenido viene del schema MCP.
 TOOL_ALTERNATIVE_GROUPS: dict[str, list[list[str]]] = _build_alternative_groups_map()
 
 
@@ -144,11 +109,7 @@ def _format_default_value(value: object) -> str:
 
 
 def get_param_description(tool_name: str, param: str) -> str:
-    """Descripción de un parámetro leída del schema de la tool MCP/LC.
-
-    Devuelve un fallback genérico si la tool no expone descripción para ese
-    parámetro (la solución preferida es enriquecer el `Field(description=…)`).
-    """
+    """Descripción de un parámetro leída del schema de la tool, o un fallback genérico si no la expone."""
     props = _iter_properties(_get_tool(tool_name))
     desc = props.get(param, {}).get("description")
     if isinstance(desc, str) and desc.strip():
@@ -157,20 +118,7 @@ def get_param_description(tool_name: str, param: str) -> str:
 
 
 def get_param_default_text(tool_name: str, param: str, provided_args: dict | None = None) -> str:
-    """Texto legible del default de un parámetro, leído del schema de la tool.
-
-    Maneja tres formas de default, todas derivadas de `json_schema_extra`:
-
-      * ``default_by={"on": <disc>, "map": {...}}`` — default condicional al
-        valor de otro parámetro (p. ej. `threshold` según `method`). Si
-        ``provided_args`` permite resolver el discriminador, devuelve el valor
-        concreto; si no, lista el mapa.
-      * ``default_note=<texto>`` — el default no es un valor fijo sino una
-        explicación (p. ej. "se calcularán automáticamente…").
-      * ``default=<valor>`` — el `Field(default=…)` normal del schema.
-
-    Como último recurso devuelve «sin valor por defecto».
-    """
+    """Texto legible del default de un parámetro: default_by condicional, default_note textual o el default normal del schema."""
     props = _iter_properties(_get_tool(tool_name))
     entry = props.get(param, {})
     if not isinstance(entry, dict):
@@ -212,32 +160,12 @@ def get_tool_description(tool_name: str) -> str:
 
 
 def get_field_metadata(tool_name: str) -> dict[str, dict]:
-    """Devuelve `{param: {description, default, enum, evidence, …}}` de la tool.
-
-    Expone el schema normalizado (incluidas las claves de `json_schema_extra`)
-    para que otros nodos del agente —p. ej. la defensa anti-invención en
-    `reasoning.py`— deriven su metadata del schema MCP sin duplicarla.
-    """
+    """Devuelve el schema normalizado {param: {description, default, enum, evidence, …}} para que otros nodos deriven su metadata sin duplicarla."""
     return _iter_properties(_get_tool(tool_name))
 
 
-# ── Parámetros opcionales "tunables" ────────────────────────────────────────
-#
-# Son los parámetros con default que afectan materialmente al algoritmo
-# (umbrales, número de bins, coeficientes…). Cuando el usuario no los fija,
-# preferimos preguntar antes que ejecutar a ciegas con los defaults.
-#
-# Se excluyen los cosméticos (`with_plot`, `column_name`, `return_metrics`)
-# porque no cambian el resultado analítico.
-#
-# La fuente de verdad es el schema MCP: cada parámetro tunable se marca con
-# ``json_schema_extra``:
-#   * ``{"tunable": true}`` — siempre relevante (p. ej. forecast.frequency).
-#   * ``{"tunable_if": {"<discriminador>": [valores…]}}`` — relevante solo
-#     cuando otro parámetro toma ciertos valores (p. ej. drift.num_bins solo
-#     aplica si method=='PSI'). El nombre del discriminador viaja en el propio
-#     metadato, así que este módulo no necesita conocer method/strategy/relation.
-
+# Tunables: opcionales con default que afectan al algoritmo (umbrales, bins, coeficientes…); se marcan en el schema con
+# json_schema_extra {"tunable": true} o {"tunable_if": {"<disc>": [valores]}} y se confirman con el usuario antes de ejecutar.
 def _is_empty(value: object) -> bool:
     """True si el valor cuenta como ausente (None, cadena vacía o lista vacía)."""
     return value is None or value == "" or value == []
@@ -250,12 +178,7 @@ def get_missing_params(tool_name: str, provided_args: dict) -> list[str]:
 
 
 def get_missing_alternative_groups(tool_name: str, provided_args: dict) -> list[list[str]]:
-    """Devuelve los grupos "uno-de" que ningún parámetro satisface.
-
-    Un grupo está satisfecho si AL MENOS uno de sus parámetros tiene valor.
-    La regla "no ambos" (XOR estricto) la valida la propia API: aquí solo
-    pedimos lo mínimo para que la llamada salga adelante.
-    """
+    """Devuelve los grupos "uno-de" que ningún parámetro satisface; la regla XOR estricta la valida la propia API."""
     groups = TOOL_ALTERNATIVE_GROUPS.get(tool_name, [])
     return [
         group for group in groups
@@ -264,13 +187,7 @@ def get_missing_alternative_groups(tool_name: str, provided_args: dict) -> list[
 
 
 def get_tunable_params(tool_name: str, provided_args: dict) -> list[str]:
-    """Devuelve los parámetros opcionales relevantes para esta llamada.
-
-    Genérico y schema-driven: recorre las propiedades de la tool e incluye las
-    marcadas con ``tunable`` (siempre) o ``tunable_if`` (cuando el valor actual
-    del discriminador coincide). El razonador no conoce qué parámetro es el
-    discriminador de cada tool: esa relación vive en el schema MCP.
-    """
+    """Devuelve los opcionales relevantes: los marcados tunable (siempre) o tunable_if (si el valor del discriminador coincide)."""
     result: list[str] = []
     for name, info in _iter_properties(_get_tool(tool_name)).items():
         if not isinstance(info, dict):
@@ -297,13 +214,7 @@ def get_missing_tunable_params(tool_name: str, provided_args: dict) -> list[str]
 
 
 def _describe_param_with_options(tool_name: str, param: str) -> str:
-    """Descripción del parámetro + sus opciones válidas (enum) si las tiene.
-
-    Como el system prompt ya no lista los parámetros de cada herramienta
-    (el agente usa schema fino), este nodo es el único punto donde el usuario
-    ve los valores admitidos. Si el parámetro es un enum (``Literal[...]``),
-    los añadimos para que la pregunta sea autosuficiente.
-    """
+    """Descripción del parámetro más sus opciones válidas (enum) si las tiene; es el único punto donde el usuario ve los valores admitidos."""
     desc = get_param_description(tool_name, param)
     enum = get_param_enum(tool_name, param)
     if enum:
@@ -352,23 +263,16 @@ def _format_optional_confirmation_message(
     return "\n".join(lines)
 
 
-# ── Parser de la respuesta del usuario a la confirmación de opcionales ──────
-#
-# El razonador llama a estos helpers cuando el estado indica que estamos
-# esperando la confirmación del usuario sobre los tunables. Es determinista
-# para evitar que el LLM local (qwen) pierda los args originales al re-emitir
-# la tool call.
+# Parser determinista de la respuesta del usuario a la confirmación de opcionales (evita que el LLM local pierda los args originales al re-emitir la tool call).
 
-# "no", "cancela", "olvida", "déjalo", "para" como palabra suelta o "no quiero/
-# no ejecutes/no detectes" detectan intención de cancelar.
+# Detecta intención de cancelar: "cancela/olvida/déjalo/para" o "no quiero/no ejecutes/…".
 _CANCEL_PATTERN = re.compile(
     r"\b(cancela|olvida|d[eé]jalo|para)\b|"
     r"\bno\s+(quiero|deseo|hagas|ejecutes|detectes|lo\s+hagas|continues|sigas)\b",
     re.IGNORECASE,
 )
 
-# Captura pares nombre=valor o nombre: valor. Acepta números (con signo y
-# decimales/notación científica), listas entre corchetes y strings simples.
+# Captura pares nombre=valor o nombre: valor (números con signo/decimales/notación científica, listas entre corchetes y strings simples).
 _VALUE_PAIR_RE = re.compile(
     r"(?P<name>[A-Za-z_][A-Za-z_0-9]*)\s*[=:]\s*"
     r"(?P<value>\[[^\]]*\]|'[^']*'|\"[^\"]*\"|[\-+]?\d+\.?\d*(?:[eE][\-+]?\d+)?|[A-Za-z_][A-Za-z_0-9]*)"
@@ -381,13 +285,7 @@ def is_cancel_intent(user_message: str) -> bool:
 
 
 def parse_optional_values(user_message: str, tunables: list[str]) -> dict:
-    """Extrae pares `nombre=valor` del mensaje del usuario para los tunables conocidos.
-
-    Solo se retienen los nombres presentes en la lista de tunables (evita que
-    palabras sueltas como "default=1" contaminen otros parámetros). Los valores
-    numéricos se convierten a int/float; las listas y strings entrecomillados se
-    parsean al tipo correspondiente.
-    """
+    """Extrae pares nombre=valor del mensaje, solo para los tunables conocidos, convirtiendo números, listas y strings entrecomillados a su tipo."""
     found: dict[str, object] = {}
     for match in _VALUE_PAIR_RE.finditer(user_message):
         name = match.group("name")
@@ -433,16 +331,7 @@ def parse_optional_values(user_message: str, tunables: list[str]) -> dict:
 
 
 def solicitar_parametros_node(state: AgentState) -> dict:
-    """Pide al usuario los datos que faltan para ejecutar la herramienta pendiente.
-
-    Dos modos:
-      * Si faltan parámetros OBLIGATORIOS, pregunta por cada uno.
-      * Si todos los obligatorios están y solo faltan TUNABLES, lista los
-        defaults y pide confirmación.
-
-    No limpia `pending_tool` ni `pending_params`; el razonador los reseteará
-    cuando el usuario responda y se pueda completar la llamada.
-    """
+    """Pide los datos que faltan: pregunta por los obligatorios ausentes o, si solo faltan tunables, lista los defaults y pide confirmación."""
     pending_tool = state.get("pending_tool")
     if not pending_tool:
         return {}

@@ -34,9 +34,7 @@ _MAX_ERRORS = 3
 
 _KNOWN_TOOL_NAMES = {t.name for t in AGENT_TOOLS}
 
-# Schema cacheado de cada tool: nombres de parámetros que su firma acepta.
-# Se usa para descartar la herencia de un parámetro si la tool destino no lo
-# declara (evita inyectar args inválidos que el ToolNode rechazaría).
+# Schema cacheado: nombres de parámetros que la firma de cada tool acepta (para descartar herencias que el ToolNode rechazaría).
 _TOOL_ACCEPTED_PARAMS: dict[str, frozenset[str]] = {}
 for _t in AGENT_TOOLS:
     _schema = getattr(_t, "args_schema", None)
@@ -52,8 +50,7 @@ def _last_tool_message_name(messages: list) -> str | None:
         if isinstance(msg, ToolMessage):
             return getattr(msg, "name", None)
         if isinstance(msg, (AIMessage,)):
-            # Si vemos un AIMessage de texto plano (sin tool_calls), el ciclo
-            # anterior ya cerró. No buscamos más atrás.
+            # AIMessage de texto plano (sin tool_calls): el ciclo anterior ya cerró.
             if not getattr(msg, "tool_calls", None):
                 return None
     return None
@@ -130,14 +127,7 @@ def _missing_facts(response_text: str, facts: list[str]) -> list[str]:
 
 
 def _verify_and_repair(response: AIMessage, messages: list) -> AIMessage:
-    """Verifica la fidelidad numérica de la síntesis y reintenta una vez si falla.
-
-    Si la respuesta omite algún valor determinista del ToolMessage analítico,
-    reinvoca el LLM (sin herramientas, para forzar texto) con un mensaje
-    correctivo. Conserva el reintento solo si reduce los valores omitidos; en
-    caso contrario mantiene la respuesta original. Cualquier excepción devuelve
-    la respuesta original: la verificación nunca debe romper el grafo.
-    """
+    """Verifica la fidelidad numérica y reintenta una vez (sin tools) si la síntesis omite valores del ToolMessage; conserva el reintento solo si mejora."""
     try:
         content = response.content
         if not isinstance(content, str) or not content.strip():
@@ -181,24 +171,8 @@ def _verify_and_repair(response: AIMessage, messages: list) -> AIMessage:
         return response
 
 
-# ── Defensa contra invención de args sin evidencia en el mensaje del usuario ─
-#
-# Aunque `RULE_NO_INVENT` lo prohíbe en el system prompt, el modelo local
-# cuantizado tiende a rellenar campos "rellenables por sentido común" (fechas,
-# frecuencias, métodos, tipos numéricos, listas de parámetros, enteros,
-# nombres de columna) ante peticiones vagas. Cuando la tool call llega con un
-# valor inventado, `get_missing_params` no lo detecta como ausente y la tool
-# se ejecuta con datos que el usuario nunca eligió.
-#
-# Esta defensa post-LLM revisa la primera tool call y, para cada (tool, arg)
-# del `_FIELD_EVIDENCE_MAP`, aplica el checker del tipo correspondiente. Si la
-# evidencia no aparece en el historial de mensajes del usuario, el arg se
-# elimina y `get_missing_params` lo recogerá como ausente para que el grafo
-# lo pida explícitamente.
-#
-# Cobertura: todas las herramientas analíticas (sintéticas, drift, augment,
-# exogenous, forecast). `file_path` no se vigila aquí: la sección FICHERO
-# ACTIVO del prompt suministra la ruta de forma legítima desde el estado.
+# Defensa anti-invención: el modelo cuantizado rellena campos por sentido común ante peticiones vagas. Para cada (tool, arg)
+# de _FIELD_EVIDENCE_MAP, si la evidencia no aparece en el historial del usuario el arg se elimina y se pide como ausente.
 
 
 # Patrones de evidencia textual 
@@ -217,10 +191,7 @@ _FREQUENCY_KEYWORDS: tuple[str, ...] = (
     "freq", "frecuencia",
 )
 
-# Cualquier dígito o número español escrito en palabras (desde "dos") cuenta
-# como evidencia. "uno/una/un" se excluye a propósito: en español funciona
-# casi siempre como artículo indefinido ("una serie", "un análisis"), no como
-# numeral, y daría muchos falsos positivos sobre `periods`/`forecast_steps`.
+# Dígito o número en palabras (desde "dos") cuenta como evidencia; "uno/una/un" se excluye por ser artículo indefinido y dar falsos positivos.
 _INTEGER_EVIDENCE_RE = re.compile(
     r"\b\d+\b"
     r"|\b(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|"
@@ -229,9 +200,7 @@ _INTEGER_EVIDENCE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Listas numéricas: corchetes/paréntesis con dígitos, decimales sueltos, pares
-# separados por coma, patrones de asignación letra=número ("p = 30", "mu=0",
-# "lambda=5"), o palabras explícitas para referirse a parámetros.
+# Listas numéricas: corchetes con dígitos, decimales, pares por coma, asignaciones letra=número o palabras de parámetro.
 _NUMERIC_LIST_EVIDENCE_RE = re.compile(
     r"[\[\(]\s*[-+]?\d"
     r"|\b-?\d+[\.,]\d+\b"
@@ -242,12 +211,7 @@ _NUMERIC_LIST_EVIDENCE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Frases que el usuario emplea cuando delega la elección de un valor al sistema
-# ("usa los defaults", "cualquiera", "como tú quieras", "lo que sea"). Cuando
-# alguna aparece en el historial, la defensa anti-invención se desactiva por
-# completo para ese turno: el usuario ha aceptado explícitamente que el LLM
-# proponga un valor sensato, y bloquearlo provoca bucles infinitos de la forma
-# usuario→"usa defaults"→agente→"dame el valor"→usuario→"cualquiera"→…
+# Frases con las que el usuario delega la elección de un valor ("usa los defaults", "cualquiera", …): desactivan la defensa anti-invención ese turno para no entrar en bucle.
 _DELEGATION_KEYWORDS: tuple[str, ...] = (
     "default", "predetermin", "est[aá]ndar", "t[ií]pico", "habitual",
     "lo que sea", "lo que t[uú] quieras", "lo que quieras",
@@ -296,13 +260,7 @@ def _build_delegation_directive(
     return SystemMessage(content=body)
 
 
-# Frases con las que el usuario pide una operación NUEVA reutilizando parámetros
-# de un turno anterior ("ahora con los parámetros anteriores…", "los mismos
-# parámetros pero…", "como antes pero…"). A diferencia de la delegación, aquí no
-# cede la elección de un valor: pide reutilizar lo ya establecido en la sesión.
-# El modelo cuantizado, ante este seguimiento cross-tool, tiende a responder en
-# prosa imitando la plantilla "Para continuar necesito…" en vez de emitir el
-# JSON; la directiva de abajo lo corrige.
+# Frases con las que el usuario pide una operación NUEVA reutilizando parámetros de un turno anterior ("los mismos parámetros pero…", "como antes pero…").
 _FOLLOWUP_REUSE_KEYWORDS: tuple[str, ...] = (
     "anteriores", "de antes", "los de antes",
     "mismos par[áa]metros", "esos par[áa]metros", "los mismos", "las mismas",
@@ -312,13 +270,7 @@ _FOLLOWUP_REUSE_KEYWORDS: tuple[str, ...] = (
 
 
 def _is_inheriting_followup(user_text: str, session_facts: dict) -> bool:
-    """True si el usuario pide algo nuevo reutilizando parámetros ya conocidos.
-
-    Solo se considera seguimiento heredante si (a) hay parámetros heredables en
-    sesión (``session_facts['by_param']`` no vacío) y (b) el texto referencia
-    explícitamente reutilizar valores previos. Ser estricto en (b) evita que la
-    directiva se dispare en preguntas teóricas u otras peticiones no analíticas.
-    """
+    """True si el usuario pide algo nuevo reutilizando parámetros ya conocidos: requiere by_param no vacío y una referencia explícita a reutilizar valores previos."""
     by_param = (session_facts or {}).get("by_param") or {}
     if not by_param:
         return False
@@ -326,14 +278,7 @@ def _is_inheriting_followup(user_text: str, session_facts: dict) -> bool:
 
 
 def _build_followup_directive(session_facts: dict) -> SystemMessage:
-    """Directiva que fuerza la tool call en un seguimiento que hereda parámetros.
-
-    Mismo patrón que ``_build_delegation_directive``: no construimos la tool call
-    por código, solo indicamos al LLM que debe emitir el JSON ahora en lugar de
-    responder en texto. La herencia genérica (``_inherit_from_session``) rellenará
-    los parámetros de las familias semánticas; si falta un obligatorio nuevo de la
-    tool destino, la validación de parámetros lo pedirá de forma normal.
-    """
+    """Directiva que fuerza la tool call en un seguimiento que hereda parámetros: indica al LLM que emita el JSON ahora; la herencia genérica rellenará los parámetros."""
     known = ", ".join(sorted((session_facts or {}).get("by_param", {}).keys()))
     body = (
         "El usuario pide una operación NUEVA reutilizando parámetros ya "
@@ -348,17 +293,8 @@ def _build_followup_directive(session_facts: dict) -> SystemMessage:
     return SystemMessage(content=body)
 
 
-# ── Petición de acción analítica que el modelo debe resolver con tool call ───
-#
-# El modelo local a veces responde en PROSA pidiendo parámetros cuando debería
-# emitir la tool call y dejar que `solicitar_parametros_node` los recoja de forma
-# estructurada (con sus opciones). Pasa sobre todo con peticiones vagas de
-# generación ("genérame una serie sintética"): el modelo trata el tipo como algo
-# que debe saber antes de llamar. Cuando detectamos una petición de acción clara
-# y el modelo NO emitió tool call, reintentamos UNA vez forzando la llamada con
-# contexto compacto + una directiva (mismo patrón que el seguimiento heredante).
-# `tool_choice="any"` solo no basta con este modelo: la directiva es lo que de
-# verdad lo empuja a emitir el JSON.
+# Petición de acción analítica que el modelo debe resolver con tool call: si responde en prosa pidiendo parámetros,
+# reintentamos una vez forzando la llamada con contexto compacto + directiva (tool_choice="any" solo no basta con este modelo).
 _ACTION_INTENT_KEYWORDS: tuple[str, ...] = (
     "sint[eé]tic", "serie aleatoria", "datos aleatorios", "simula",
     "genera", "gener[aá]", "crea", "cr[eé]a",
@@ -368,9 +304,7 @@ _ACTION_INTENT_KEYWORDS: tuple[str, ...] = (
     "detecta", "ex[oó]gena", "correlaci", "covar",
 )
 
-# Marcadores de pregunta teórica o de capacidades: si aparecen, NO forzamos
-# (la teoría la enruta consultar_teoria por el flujo normal; las preguntas de
-# capacidades y los saludos se responden en texto plano).
+# Marcadores de pregunta teórica o de capacidades: si aparecen, NO forzamos la tool call (se resuelven por el flujo normal o en texto plano).
 _NON_ACTION_MARKERS: tuple[str, ...] = (
     "qu[eé] es", "qu[eé] son", "qu[eé] significa", "explica", "expl[ií]ca",
     "diferencia", "c[oó]mo funciona", "para qu[eé] sirve", "concepto",
@@ -379,12 +313,7 @@ _NON_ACTION_MARKERS: tuple[str, ...] = (
 
 
 def _looks_like_action_request(text: str) -> bool:
-    """True si el mensaje es una petición de acción analítica clara.
-
-    Positivo si menciona alguna intención de acción (generar, detectar,
-    aumentar, predecir, crear variable…) y NO es una pregunta teórica ni de
-    capacidades. Gate del reintento que fuerza la tool call.
-    """
+    """True si el mensaje es una petición de acción analítica clara (intención de acción y no una pregunta teórica/de capacidades). Gate del reintento que fuerza la tool call."""
     if not text:
         return False
     if _has_any_keyword(text, _NON_ACTION_MARKERS):
@@ -392,34 +321,21 @@ def _looks_like_action_request(text: str) -> bool:
     return _has_any_keyword(text, _ACTION_INTENT_KEYWORDS)
 
 
-# Marcadores de generación que NO necesita fichero (las 4 generate_synthetic_*).
-# Si no hay CSV cargado solo forzamos la tool call para estas: forzar una tool
-# que requiere file_path sin CSV haría que el nodo pidiese "file_path" por texto,
-# cuando el fichero se sube por el panel lateral (no se teclea la ruta).
+# Marcadores de generación que NO necesita fichero (las 4 generate_synthetic_*): sin CSV solo forzamos la tool call para estas.
 _NO_FILE_GENERATION_MARKERS: tuple[str, ...] = (
     "sint[eé]tic", "serie aleatoria", "datos aleatorios", "simula",
 )
 
 
 def _should_force_action(text: str, csv_loaded: bool) -> bool:
-    """True si debemos reintentar forzando la tool call para esta petición.
-
-    Requiere intención de acción y, si no hay CSV, que sea una generación
-    sintética (que no necesita fichero).
-    """
+    """True si debemos reintentar forzando la tool call: requiere intención de acción y, sin CSV, que sea una generación sintética."""
     if not _looks_like_action_request(text):
         return False
     return bool(csv_loaded) or _has_any_keyword(text, _NO_FILE_GENERATION_MARKERS)
 
 
 def _build_action_directive() -> SystemMessage:
-    """Directiva que fuerza la tool call ante una petición de acción en prosa.
-
-    No construye la tool call por código: empuja al LLM a emitir el JSON ya, con
-    los parámetros explícitos que tenga (o ``arguments={}``), en vez de preguntar
-    en texto. Para 'serie/datos sintéticos' sin concretar, sugiere la opción por
-    defecto (generate_synthetic_distribution) para resolver la ambigüedad de tool.
-    """
+    """Directiva que fuerza la tool call ante una petición de acción en prosa: empuja al LLM a emitir el JSON ya, sugiriendo generate_synthetic_distribution si la serie no se concreta."""
     return SystemMessage(content=(
         "El usuario pide una operación analítica. DEBES emitir AHORA el JSON de la "
         "tool call de la herramienta más adecuada a su petición (p. ej. un "
@@ -432,15 +348,8 @@ def _build_action_directive() -> SystemMessage:
     ))
 
 
-# ── Pregunta teórica que el agente debe fundamentar con RAG (consultar_teoria) ─
-#
-# El modelo local cuantizado a veces responde una pregunta conceptual ("¿qué es
-# el PSI?") de su conocimiento paramétrico, sin consultar la documentación. Eso
-# rompe el grounding (RF/RNF de citas): la respuesta no es trazable a las fuentes
-# del corpus. Cuando detectamos una pregunta teórica clara y el modelo NO emitió
-# tool call, sintetizamos de forma determinista la llamada a `consultar_teoria`
-# (mismo patrón que `_replay_pending_tool_call`), para garantizar que la síntesis
-# parte del contexto recuperado y cita las fuentes.
+# Pregunta teórica que el agente debe fundamentar con RAG: si el modelo responde de su conocimiento sin consultar la documentación,
+# sintetizamos de forma determinista la llamada a consultar_teoria para garantizar grounding y citas.
 _THEORY_QUESTION_MARKERS: tuple[str, ...] = (
     "qu[eé] es", "qu[eé] son", "qu[eé] significa", "qu[eé] mide",
     "explica", "expl[ií]ca", "explicame", "expl[ií]came",
@@ -449,9 +358,7 @@ _THEORY_QUESTION_MARKERS: tuple[str, ...] = (
     "c[oó]mo funciona", "para qu[eé] sirve", "por qu[eé] se usa",
 )
 
-# Si la pregunta referencia los DATOS del usuario (su CSV, columnas, resultados,
-# una gráfica…) NO es teórica: la responde el flujo normal u otras tools, no el
-# RAG sobre la documentación.
+# Si la pregunta referencia los DATOS del usuario (CSV, columnas, resultados…) NO es teórica: la resuelve el flujo normal, no el RAG.
 _DATA_REFERENCE_MARKERS: tuple[str, ...] = (
     "mi csv", "mis datos", "mi fichero", "mi archivo", "mi serie", "mi dataset",
     "el fichero", "el archivo", "este dataset",
@@ -461,11 +368,7 @@ _DATA_REFERENCE_MARKERS: tuple[str, ...] = (
 
 
 def _looks_like_theory_question(text: str) -> bool:
-    """True si el mensaje es una pregunta conceptual sobre teoría (no sobre datos).
-
-    Gate del forzado determinista de `consultar_teoria`: requiere un marcador
-    conceptual y la ausencia de referencias a los datos del usuario.
-    """
+    """True si el mensaje es una pregunta conceptual sobre teoría (marcador conceptual y sin referencias a los datos del usuario). Gate del forzado de consultar_teoria."""
     if not text:
         return False
     if _has_any_keyword(text, _DATA_REFERENCE_MARKERS):
@@ -473,9 +376,7 @@ def _looks_like_theory_question(text: str) -> bool:
     return _has_any_keyword(text, _THEORY_QUESTION_MARKERS)
 
 
-# Mapas de palabras-clave para los enums semánticos (el LLM hace traducción
-# legítima «normal» → 1, «kolmogorov-smirnov» → KS; queremos detectar que
-# el usuario dijo *alguna* palabra relacionada).
+# Mapas de palabras-clave para los enums semánticos: detectar que el usuario nombró alguna opción relacionada.
 _DISTRIBUTION_NAMES: tuple[str, ...] = (
     "normal", "gaussian", "gauss", "poisson", "uniform", "uniforme", "beta",
     "gamma", "exponen", "binomial", "chi", "student", "t-student",
@@ -507,12 +408,7 @@ _AUGMENT_STRATEGY_NAMES: tuple[str, ...] = (
 _EXOGENOUS_RELATION_NAMES: tuple[str, ...] = (
     "correla", "covar", "relaci[oó]n",
 )
-# Cualquier mención (a favor o en contra) de la gráfica/imagen. Es la evidencia
-# que habilita respetar el `with_plot` que emite el modelo: sin mención, el
-# booleano va sin respaldo (los modelos cuantizados con schema fino rellenan
-# `with_plot=False` por defecto y suprimen el PNG), así que se descarta y aplica
-# el default `True` del schema. Con mención ("con gráfica" / "sin imagen") se
-# conserva el valor del modelo, sea True o False.
+# Mención (a favor o en contra) de la gráfica/imagen: evidencia que habilita respetar el with_plot del modelo; sin ella se descarta y aplica el default True del schema.
 _PLOT_PREF_NAMES: tuple[str, ...] = (
     "gr[aá]fic", "grafic", "imagen", "im[aá]genes", "plot", "visualiz",
     "dibuj", "png", "chart", "figura", "represent",
@@ -571,12 +467,7 @@ def _check_exogenous_relation(user_text: str, value: object, state: dict) -> boo
 
 
 def _check_plot_pref(user_text: str, value: object, state: dict) -> bool:
-    """Evidencia para `with_plot`: el usuario mencionó algo sobre la gráfica.
-
-    Sin mención, el `with_plot` emitido por el modelo carece de respaldo y se
-    descarta (→ default True del schema, que sí genera el PNG). Con mención, se
-    respeta el valor del modelo (p. ej. "sin gráfica" → with_plot=False).
-    """
+    """Evidencia para with_plot: si el usuario no menciona la gráfica se descarta el valor del modelo (→ default True); con mención se respeta ("sin gráfica" → False)."""
     return _has_any_keyword(user_text, _PLOT_PREF_NAMES)
 
 
@@ -624,16 +515,8 @@ _CHECKS: dict[str, Callable[[str, object, dict], bool]] = {
 }
 
 
-# ── Mapa (tool, arg) → tipo de evidencia, derivado del schema ───────────────
-#
-# Antes era un literal hand-coded que repetía a mano lo que cada Field de la
-# tool MCP ya declara en `json_schema_extra={"evidence": "<tipo>"}`. Ahora se
-# deriva: para cada herramienta analítica se leen sus propiedades y se recoge la
-# clave `evidence` de las que la declaren. Añadir/cambiar un campo invent-prone
-# en `mcp_server/tools/` no requiere tocar este módulo.
-#
-# `file_path` queda fuera a propósito (no lleva `evidence`): la sección FICHERO
-# ACTIVO del prompt lo proporciona desde el estado.
+# Mapa (tool, arg) → tipo de evidencia, derivado del schema: por cada tool analítica se recoge la clave evidence de sus Field.
+# file_path queda fuera a propósito (la sección FICHERO ACTIVO del prompt lo proporciona desde el estado).
 def _build_field_evidence_map() -> dict[str, dict[str, str]]:
     out: dict[str, dict[str, str]] = {}
     for tool_name in ANALYTICAL_TOOL_NAMES:
@@ -661,17 +544,7 @@ def _aggregate_human_text(messages: list) -> str:
 
 
 def _strip_invented_args(response: AIMessage, state: dict) -> AIMessage:
-    """Elimina de la tool call los args inventados sin evidencia en el texto del usuario.
-
-    Se ejecuta antes de `_merge_with_pending_params`, por lo que solo ve los
-    args que el LLM acaba de emitir (no los recogidos en turnos previos). Si
-    en pending_params hay un valor legítimo para el campo, se restaurará en
-    el siguiente paso del pipeline; los inventados quedan fuera y caen al
-    nodo de solicitud de parámetros.
-
-    Recibe `state` (no solo `messages`) porque algunos checkers consultan
-    `csv_metadata` para validar nombres de columna contra el CSV cargado.
-    """
+    """Elimina de la tool call los args inventados sin evidencia en el texto del usuario; los recogidos en turnos previos se restauran luego en el merge. Recibe state porque algunos checkers consultan csv_metadata."""
     tool_calls = getattr(response, "tool_calls", None) or []
     if not tool_calls:
         return response
@@ -688,11 +561,7 @@ def _strip_invented_args(response: AIMessage, state: dict) -> AIMessage:
     if not user_text:
         return response
 
-    # Bypass por delegación: si el usuario acaba de delegar ("usa los defaults",
-    # "cualquiera", "como tú quieras"…), la defensa se desactiva ese turno y
-    # dejamos que el LLM proponga un valor sensato. Mirar SOLO el último mensaje
-    # del usuario evita que una delegación de un turno anterior arrastre permisos
-    # a turnos posteriores no relacionados.
+    # Bypass por delegación: si el ÚLTIMO mensaje del usuario delega, la defensa se desactiva ese turno y dejamos que el LLM proponga un valor.
     last_human = ""
     for msg in reversed(messages):
         if isinstance(msg, HumanMessage):
@@ -732,22 +601,12 @@ def _strip_invented_args(response: AIMessage, state: dict) -> AIMessage:
     )
 
 
-# ── Resolución determinista de enums "código=nombre" (distribution_type, …) ──
-#
-# Las tools sintéticas codifican el tipo como un entero arbitrario y no
-# contiguo (distribution_type 1=Normal, 2=Binomial…; trend_type 1=lineal…). Con
-# el schema fino el modelo NO ve ese mapa al emitir la tool call y a veces yerra
-# el código (p. ej. "normal" → 2/Binomial). Esta defensa lo corrige: parsea el
-# mapa código→nombre de la PROPIA descripción del schema (fuente de verdad, sin
-# duplicar tablas) y, si el usuario nombró una de las opciones, fija el código
-# canónico. Complementa a _strip_invented_args, que solo comprueba que el usuario
-# nombró ALGUNA distribución, no que el código emitido sea el correcto.
+# Resolución determinista de enums "código=nombre" (distribution_type, …): el modelo a veces yerra el código entero con schema fino.
+# Parsea el mapa código→nombre de la propia descripción del schema y, si el usuario nombró una opción, fija el código canónico.
 
 _ENUM_CODE_PATTERN = re.compile(r"(\d+)\s*=\s*([A-Za-zÀ-ÿ]+)")
 
-# Alias de idioma para nombres que la descripción del schema da con un único
-# término canónico (dice "Normal"; el usuario puede decir "gaussiana"). Es
-# metadato lingüístico, no del contrato de la API.
+# Alias de idioma (el schema dice "Normal"; el usuario puede decir "gaussiana"): metadato lingüístico, no del contrato de la API.
 _ENUM_NAME_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
     "distribution_type": {
         "normal": ("gaussian", "gauss", "gaussiana", "gaussiano"),
@@ -773,14 +632,7 @@ def _strip_accents(text: str) -> str:
 
 @lru_cache(maxsize=1)
 def _enum_code_maps() -> dict[str, dict[str, int]]:
-    """``{param: {nombre_sin_tildes: código}}`` derivado de las descripciones del schema.
-
-    Para cada parámetro cuyo ``description`` enumera pares "N=Nombre" (≥2),
-    construye el mapa nombre→código tomando la descripción más rica entre las
-    tools que lo declaran (p. ej. ``distribution_type`` sale de
-    ``generate_synthetic_distribution`` y se reutiliza para la periódica, cuya
-    descripción solo remite a aquella). Añade los alias de ``_ENUM_NAME_ALIASES``.
-    """
+    """{param: {nombre_sin_tildes: código}} derivado de las descripciones del schema (pares "N=Nombre", la más rica entre las tools), más los alias de _ENUM_NAME_ALIASES."""
     best: dict[str, dict[str, int]] = {}
     for tool in AGENT_TOOLS:
         for param, info in get_field_metadata(tool.name).items():
@@ -790,10 +642,7 @@ def _enum_code_maps() -> dict[str, dict[str, int]]:
             if len(pairs) < 2:
                 continue
             names = [_strip_accents(name) for _, name in pairs]
-            # Descripciones cuyo primer término por código no es distintivo (p. ej.
-            # pattern_type: "1=variación de amplitud, 2=variación de cantidad", ambos
-            # "variación") no son resolubles por nombre: las descartamos para no
-            # mapear a un código equivocado.
+            # Si dos códigos comparten el primer término (p. ej. pattern_type: ambos "variación") no es resoluble por nombre: descartamos.
             if len(set(names)) != len(names):
                 continue
             mapping = {name: int(code) for name, (code, _) in zip(names, pairs)}
@@ -814,24 +663,14 @@ def _enum_code_maps() -> dict[str, dict[str, int]]:
 
 
 def _match_enum(user_text: str, name_to_code: dict[str, int]) -> int | None:
-    """Código canónico que el usuario nombró, o None si ninguno o es ambiguo.
-
-    Devuelve un código solo si exactamente un valor del enum aparece en el texto;
-    si el usuario menciona dos (o ninguno), no tocamos el arg del modelo.
-    """
+    """Código canónico que el usuario nombró, o None: devuelve un código solo si exactamente un valor del enum aparece en el texto."""
     norm = _strip_accents(user_text)
     found = {code for name, code in name_to_code.items() if name in norm}
     return next(iter(found)) if len(found) == 1 else None
 
 
 def _resolve_enum_codes(response: AIMessage, state: AgentState) -> AIMessage:
-    """Corrige/fija los enums código=nombre de la tool call según lo que el usuario nombró.
-
-    Solo actúa sobre parámetros que la tool destino acepta y que tienen un mapa
-    código=nombre en su schema. Si el usuario nombró una opción de forma
-    inequívoca, fija ese código (sobrescribe uno mal mapeado o rellena uno
-    ausente — en ambos casos hay evidencia textual, no es invención).
-    """
+    """Corrige/fija los enums código=nombre de la tool call según lo que el usuario nombró (solo en parámetros que la tool acepta y con evidencia textual inequívoca)."""
     tool_calls = getattr(response, "tool_calls", None) or []
     if not tool_calls:
         return response
@@ -874,33 +713,12 @@ def _resolve_enum_codes(response: AIMessage, state: AgentState) -> AIMessage:
 
 
 def _drop_empty_args(args: dict) -> dict:
-    """Elimina los args con valor "ausente" (``None``, ``""`` o ``[]``).
-
-    Los modelos cuantizados con schema fino emiten a menudo *placeholders* vacíos
-    para parámetros que no aplican (p. ej. el miembro XOR que no usan:
-    ``end_date=""`` cuando van a pasar ``periods``). Esos vacíos se arrastran en
-    ``pending_params`` y llegan literalmente a la tool MCP, cuya validación trata
-    ``end_date=""`` como "provisto" y rechaza la llamada con "no ambos". Limpiarlos
-    aquí garantiza que solo viajen valores reales: lo que falte se detecta como
-    ausente (``get_missing_params``) y se pide al usuario, no se manda vacío.
-    """
+    """Elimina los args con valor ausente (None, "" o []): los placeholders vacíos del modelo (p. ej. end_date="" junto a periods) llegarían a la API como "provistos" y la harían fallar con "no ambos"."""
     return {k: v for k, v in args.items() if v not in (None, "", [])}
 
 
 def _merge_with_pending_params(response: AIMessage, state: AgentState) -> AIMessage:
-    """Fusiona los args ya recogidos en `pending_params` con la nueva tool call.
-
-    Cuando el turno anterior pidió parámetros obligatorios al usuario, los
-    modelos locales cuantizados a menudo re-emiten la tool call con SOLO el
-    parámetro que el usuario acaba de aportar y olvidan los args originales
-    (file_path, method, etc.). Esto provoca un bucle pregunta → respuesta →
-    pregunta porque el razonador vuelve a detectar obligatorios ausentes.
-
-    La fusión conserva todos los valores no vacíos previamente recogidos y deja
-    que los args del LLM sobrescriban únicamente cuando aportan un valor real.
-    Si la tool call es para una tool distinta a la pendiente (el usuario cambió
-    de intención), no se fusiona nada.
-    """
+    """Fusiona los args ya recogidos en pending_params con la nueva tool call (el modelo suele re-emitir solo el último parámetro y olvidar los originales). No fusiona si la tool call es para otra tool distinta a la pendiente."""
     tool_calls = getattr(response, "tool_calls", None) or []
     if not tool_calls:
         return response
@@ -951,19 +769,7 @@ def _last_human_message_content(messages: list) -> str:
 
 
 def _replay_pending_tool_call(state: AgentState) -> dict:
-    """Construye la tool call de forma determinista tras la confirmación del usuario.
-
-    Se invoca cuando el razonador detecta que el turno actual responde a una
-    pregunta de confirmación de parámetros opcionales (`optionals_confirmed_for`
-    está fijado y coincide con `pending_tool`). En lugar de re-invocar al LLM
-    (que con modelos locales cuantizados suele "olvidar" los args originales
-    y vuelve a pedirlos), se reconstruye la tool call a partir de
-    `pending_params` + cualquier `nombre=valor` que el usuario haya indicado
-    explícitamente en su respuesta.
-
-    Si el usuario expresa cancelación ("no quiero", "olvídalo", etc.), se
-    aborta la operación y se limpia el estado pendiente.
-    """
+    """Construye la tool call de forma determinista tras la confirmación de opcionales, reusando pending_params + los nombre=valor que el usuario indique. Si el usuario cancela, aborta y limpia el estado pendiente."""
     pending_tool = state.get("pending_tool") or ""
     base_args = dict(state.get("pending_params") or {})
     user_msg = _last_human_message_content(state.get("messages", []))
@@ -971,9 +777,7 @@ def _replay_pending_tool_call(state: AgentState) -> dict:
     tunables = get_tunable_params(pending_tool, base_args)
     explicit = parse_optional_values(user_msg, tunables) if user_msg else {}
 
-    # Cancelación solo si el usuario expresa negativa Y no aporta valores
-    # explícitos (ej. "no quiero ejecutarla" cancela; "no quiero defaults,
-    # usa threshold=0.3" sigue y aplica los valores).
+    # Cancela solo si hay negativa Y ningún valor explícito ("no quiero ejecutarla" cancela; "no quiero defaults, usa threshold=0.3" sigue).
     if user_msg and not explicit and is_cancel_intent(user_msg):
         return {
             "messages": [AIMessage(
@@ -1006,13 +810,7 @@ def _replay_pending_tool_call(state: AgentState) -> dict:
 
 
 def _trim_to_recent_turns(messages: list, max_turns: int) -> list:
-    """Devuelve solo los últimos ``max_turns`` turnos de usuario y sus respuestas.
-
-    Un turno empieza con un HumanMessage y abarca todo lo que viene hasta el
-    siguiente HumanMessage. Conservar el contexto reciente reduce que el LLM
-    cuantizado imite formatos repetidos de turnos antiguos; la memoria de
-    parámetros se preserva igualmente en ``session_facts`` (que NO se trunca).
-    """
+    """Devuelve solo los últimos max_turns turnos (un turno empieza en un HumanMessage); reduce que el LLM imite formatos antiguos. La memoria de parámetros vive en session_facts, que no se trunca."""
     if max_turns <= 0 or not messages:
         return list(messages)
     human_indices = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
@@ -1023,13 +821,7 @@ def _trim_to_recent_turns(messages: list, max_turns: int) -> list:
 
 
 def _build_session_facts_hint(session_facts: dict) -> str:
-    """Genera el bloque ``[CONTEXTO DE SESIÓN]`` con los parámetros heredables.
-
-    Versión compacta: una línea por parámetro con su valor. Se inyecta en el
-    system prompt para que el LLM sepa qué argumentos ya están establecidos en
-    la sesión y no los vuelva a pedir ni los invente. Si ``by_param`` está
-    vacío devuelve "" y el prompt se construye sin el bloque.
-    """
+    """Genera el bloque [CONTEXTO DE SESIÓN] (una línea por parámetro heredable) que se inyecta en el system prompt; "" si by_param está vacío."""
     by_param = (session_facts or {}).get("by_param") or {}
     if not by_param:
         return ""
@@ -1050,35 +842,14 @@ def _inherit_from_session(
     args: dict,
     session_facts: dict,
 ) -> tuple[dict, list[dict]]:
-    """Rellena ``args`` con parámetros heredables que ya estén en la sesión.
-
-    Política (silenciosa y determinista):
-      * Solo se rellena un parámetro si pertenece a ``INHERITABLE_PARAMS``
-        (familias semánticas declaradas en ``src.agent.param_families``).
-      * Solo se rellena si la tool destino acepta ese parámetro según su
-        ``args_schema``. Evita inyectar args inválidos.
-      * NUNCA sobrescribe un valor que el LLM ya emitió. Si el usuario
-        redefinió un parámetro en el turno actual, se respeta su intención.
-
-    Devuelve ``(args_enriquecidos, breadcrumbs)`` donde ``breadcrumbs`` es una
-    lista de dicts ``{name, value, source_tool}`` con cada herencia aplicada.
-
-    Esta pasada COMPLEMENTA a ``_strip_invented_args``: aquel quita los args
-    inventados sin respaldo; este rellena los que el usuario sí estableció en
-    turnos anteriores. Orden recomendado: strip → merge_pending → inherit.
-    """
+    """Rellena args con parámetros heredables de la sesión: solo los de INHERITABLE_PARAMS que la tool acepte y que el LLM no haya emitido ya. Devuelve (args_enriquecidos, breadcrumbs) con cada herencia aplicada."""
     nonempty = lambda v: v not in (None, "", [])  # noqa: E731
     by_param = (session_facts or {}).get("by_param") or {}
     accepted = _TOOL_ACCEPTED_PARAMS.get(tool_name, frozenset())
     groups = TOOL_ALTERNATIVE_GROUPS.get(tool_name, [])
 
     def _xor_sibling_already_set(param: str) -> bool:
-        """True si otro miembro del grupo XOR de ``param`` ya está fijado.
-
-        Sin esto, heredar (p. ej.) ``periods`` desde la sesión cuando el LLM ya
-        emitió ``end_date`` deja ambos miembros del grupo ``horizon`` y la API
-        rechaza la llamada ("periods o end_date, pero no ambos").
-        """
+        """True si otro miembro del grupo XOR de param ya está fijado (heredar periods con end_date ya emitido haría fallar la API con "no ambos")."""
         for grp in groups:
             if param in grp:
                 return any(nonempty(enriched.get(m)) for m in grp if m != param)
@@ -1108,17 +879,7 @@ def _inherit_from_session(
 
 
 def razonador_node(state: AgentState) -> dict:
-    """Invoca el LLM con el estado actual y decide la próxima acción.
-
-    Detecta si la respuesta del LLM incluye una tool call con parámetros
-    incompletos y, en ese caso, registra `pending_tool` y `pending_params`
-    para que el router desvíe el flujo a solicitar_parametros.
-
-    Defensa anti-bucle: si el último ToolMessage del historial proviene de
-    `consultar_teoria`, se retira esa herramienta del bind para que el LLM
-    no pueda reinvocarla en la síntesis. El `ToolMessage` ya contiene la
-    respuesta del RAG, así que el modelo debe sintetizar en texto.
-    """
+    """Invoca el LLM y decide la próxima acción: si la tool call tiene parámetros incompletos registra pending_tool/pending_params. Anti-bucle: si el último ToolMessage es de consultar_teoria, retira esa tool del bind para forzar la síntesis."""
     error_count = state.get("error_count", 0)
 
     if error_count >= _MAX_ERRORS:
@@ -1133,10 +894,7 @@ def razonador_node(state: AgentState) -> dict:
             ],
         }
 
-    # Atajo determinista: si veníamos esperando la confirmación de opcionales,
-    # reconstruimos la tool call sin pasar por el LLM. Esto evita que el modelo
-    # local re-emita la tool sin los args obligatorios (file_path, index_column,
-    # method, etc.) y termine pidiéndolos otra vez en bucle.
+    # Atajo determinista: si esperábamos la confirmación de opcionales, reconstruimos la tool call sin pasar por el LLM (evita que re-emita sin los obligatorios).
     pending_tool_state = state.get("pending_tool")
     if pending_tool_state and state.get("optionals_confirmed_for") == pending_tool_state:
         return _replay_pending_tool_call(state)
@@ -1144,26 +902,15 @@ def razonador_node(state: AgentState) -> dict:
     csv_path = state.get("csv_path")
     csv_metadata = state.get("csv_metadata")
 
-    # Truncamos el historial a los últimos N turnos del usuario
-    # (CHAT_MAX_CONTEXT_TURNS en .env). El contexto real de la sesión
-    # (parámetros heredables) vive en session_facts y se inyecta más abajo
-    # via [CONTEXTO DE SESIÓN]; el historial solo aporta el detalle de la
-    # conversación reciente.
+    # Truncamos el historial a los últimos N turnos (CHAT_MAX_CONTEXT_TURNS); los parámetros heredables viven en session_facts, no en el historial.
     max_turns = load_ollama_settings().max_context_turns
     messages = _trim_to_recent_turns(state["messages"], max_turns)
 
-    # Construimos [CONTEXTO DE SESIÓN] con los parámetros heredables ya
-    # establecidos. `build_system_prompt` lo inyecta arriba (entre rol y
-    # comportamiento) para que el LLM lo vea antes de decidir si emite tool
-    # call. Si el modelo lo ignora, la pasada de herencia (más abajo) rellena
-    # igualmente los args al final.
+    # Construimos [CONTEXTO DE SESIÓN] con los parámetros heredables; si el modelo lo ignora, la pasada de herencia rellena los args al final.
     session_facts = state.get("session_facts") or {}
     facts_hint = _build_session_facts_hint(session_facts) if session_facts else ""
 
-    # Si el último ToolMessage proviene de una herramienta analítica, el prompt
-    # incorpora el bloque RESULTADO / INTERPRETACIÓN / SIGUIENTE PASO para que la
-    # síntesis final cumpla RF-11. `build_system_prompt` ignora los nombres que no
-    # sean analíticos (p. ej. consultar_teoria), así que esto no afecta al RAG.
+    # Si el último ToolMessage es de una tool analítica, el prompt añade el bloque RESULTADO / INTERPRETACIÓN / SIGUIENTE PASO (RF-11).
     last_tool = _last_tool_message_name(messages)
     system_prompt = build_system_prompt(
         csv_path=csv_path,
@@ -1176,19 +923,8 @@ def razonador_node(state: AgentState) -> dict:
     if not messages or not isinstance(messages[0], SystemMessage):
         messages = [SystemMessage(content=system_prompt)] + messages
 
-    # Directiva de delegación: si el último HumanMessage delega ("usa los
-    # defaults", "cualquiera", "como tú quieras"…), añadimos una SystemMessage
-    # al final del historial que fuerza al LLM a invocar la tool con valores
-    # razonables propuestos por él. Sin este empujón el modelo cuantizado
-    # responde en texto plano y entra en bucle de preguntas. El LLM sigue
-    # razonando: nosotros solo le indicamos que está autorizado a decidir.
-    # Guarda anti-bucle: las directivas que FUERZAN una tool call (delegación y
-    # seguimiento heredante) solo deben actuar al INICIO del turno. Si `last_tool`
-    # está fijado, venimos de ejecutar una tool y toca SINTETIZAR el resultado en
-    # texto: forzar otra tool call aquí (con tool_choice="any") impide cerrar el
-    # ciclo y el grafo entra en bucle hasta el recursion_limit (lo vimos con el
-    # trend, cuyo último humano "…reutilizando los mismos parámetros" reactivaba
-    # el forzado en cada ciclo de síntesis).
+    # Directiva de delegación: si el último HumanMessage delega, añadimos una SystemMessage que fuerza al LLM a invocar la tool con valores que él proponga.
+    # Guarda anti-bucle: las directivas que FUERZAN una tool call solo actúan al inicio del turno (last_tool sin fijar); con tool ejecutada toca sintetizar, no forzar otra.
     last_human_text = _last_human_message_content(messages)
     force_tool_call = False
     if not last_tool and last_human_text and _user_delegates(last_human_text):
@@ -1197,23 +933,11 @@ def razonador_node(state: AgentState) -> dict:
             get_missing_params(pending_tool_state, pending_params)
             if pending_tool_state else []
         )
-        # Inyectar SIEMPRE que haya delegación: si pending_tool_state es None
-        # la directiva indica al LLM que identifique él la herramienta; si hay
-        # pending_tool con missing, le dice qué params completar; si no falta
-        # nada, le dice que invoque ya con lo que hay.
+        # Inyectar siempre que haya delegación: la directiva se adapta a si hay pending_tool y a qué params faltan.
         messages = messages + [_build_delegation_directive(pending_tool_state, missing)]
     elif not last_tool and last_human_text and _is_inheriting_followup(last_human_text, session_facts):
-        # Seguimiento que reutiliza parámetros de un turno anterior ("ahora con
-        # los parámetros anteriores, una con tendencia…"). El modelo cuantizado
-        # tiende a responder en texto imitando la plantilla de petición de datos
-        # que vio en turnos previos, sin emitir el JSON (H-B1). Ni la directiva
-        # de prompt ni `tool_choice="any"` bastan con el historial completo:
-        # Ollama ignora el tool_choice cuando el contexto es largo y contiene
-        # esas plantillas. La cura es recrear las condiciones del primer turno
-        # (que sí funciona): invocar con un contexto COMPACTO — solo el system
-        # prompt (que ya incluye [CONTEXTO DE SESIÓN] con los params heredables),
-        # la última petición del usuario y la directiva — más `tool_choice="any"`.
-        # El historial pesado no aporta aquí: los params viven en session_facts.
+        # Seguimiento que reutiliza parámetros de un turno anterior. Con el historial largo Ollama ignora tool_choice="any" e imita la plantilla de petición de datos.
+        # La cura es recrear el primer turno: contexto COMPACTO (system prompt con [CONTEXTO DE SESIÓN] + última petición + directiva) y tool_choice="any".
         messages = [
             messages[0],  # SystemMessage (rol + [CONTEXTO DE SESIÓN] + comportamiento)
             HumanMessage(content=last_human_text),
@@ -1221,18 +945,13 @@ def razonador_node(state: AgentState) -> dict:
         ]
         force_tool_call = True
 
-    # Selección de tools: si el último ToolMessage es de consultar_teoria,
-    # excluimos esa tool del bind para impedir bucles RAG → RAG → RAG.
+    # Selección de tools: si el último ToolMessage es de consultar_teoria, la excluimos del bind para impedir bucles RAG → RAG.
     if last_tool == "consultar_teoria":
         tools_for_bind = [t for t in AGENT_TOOLS if t.name != "consultar_teoria"]
     else:
         tools_for_bind = AGENT_TOOLS
 
-    # Schema fino: el modelo ve nombre + descripción de cada herramienta analítica
-    # (suficiente para SELECCIONARLA) pero no las descripciones/enums/defaults de
-    # sus parámetros ni cuáles son obligatorios. Así no puede "rellenar" args y la
-    # recogida se centraliza en solicitar_parametros_node, que lee el schema REAL.
-    # consultar_teoria se exime (su `query` la reformula el LLM legítimamente).
+    # Schema fino: el modelo ve nombre + descripción de cada tool analítica (para SELECCIONARLA) pero no sus parámetros, así no puede rellenar args; consultar_teoria se exime.
     bind_payload = thin_tool_schemas(tools_for_bind, ANALYTICAL_TOOL_NAMES)
     llm = get_llm_with_tools(bind_payload, tool_choice="any" if force_tool_call else None)
     t0 = time.perf_counter()
@@ -1240,11 +959,7 @@ def razonador_node(state: AgentState) -> dict:
     duration_ms = (time.perf_counter() - t0) * 1000.0
     response = raw_response
 
-    # Red de seguridad: si el modelo respondió en PROSA a una petición de acción
-    # clara (y no estamos sintetizando tras una tool ni en mitad de una recogida
-    # de parámetros), reintentamos UNA vez forzando la tool call con contexto
-    # compacto + directiva. Así la petición de parámetros se centraliza en el
-    # nodo (estructurada, con opciones) en vez de salir como prosa improvisada.
+    # Red de seguridad: si el modelo respondió en prosa a una petición de acción clara (sin tool previa ni recogida en curso), reintentamos una vez forzando la tool call.
     if (
         not getattr(response, "tool_calls", None)
         and not last_tool
@@ -1265,14 +980,8 @@ def razonador_node(state: AgentState) -> dict:
         if getattr(forced, "tool_calls", None):
             response = forced
 
-    # Red de seguridad RAG: si el usuario hizo una pregunta TEÓRICA y el modelo
-    # respondió en prosa (sin tool call) en vez de consultar la documentación,
-    # sintetizamos la llamada a `consultar_teoria` de forma determinista. Garantiza
-    # el grounding (la síntesis parte del contexto recuperado y cita fuentes) en vez
-    # de salir del conocimiento paramétrico del modelo. Mismas guardas que el
-    # force-action: solo al inicio de un ciclo (sin ToolMessage previo ni recogida
-    # de parámetros en curso). La query es la propia pregunta del usuario: el RAG
-    # híbrido (BM25 + denso) la resuelve sin reformulación del LLM.
+    # Red de seguridad RAG: si el usuario hizo una pregunta teórica y el modelo respondió en prosa, sintetizamos la llamada a consultar_teoria de forma determinista para garantizar el grounding.
+    # Mismas guardas que el force-action (solo al inicio de ciclo); la query es la propia pregunta del usuario.
     if (
         not getattr(response, "tool_calls", None)
         and not last_tool
@@ -1290,24 +999,14 @@ def razonador_node(state: AgentState) -> dict:
             }],
         )
 
-    # Anti-invención (RULE_NO_INVENT defensiva): retira args sin respaldo en el
-    # historial del usuario (fechas, frecuencias, métodos, listas numéricas,
-    # nombres de columna, etc.). Debe ir ANTES del merge: si pending_params
-    # tenía un valor legítimo recogido en un turno anterior, el merge posterior
-    # lo repondrá; los inventados de novo caen y forzarán a solicitar_parametros.
+    # Anti-invención: retira args sin respaldo en el historial. Va ANTES del merge: un valor legítimo de un turno previo lo repone el merge; los inventados caen y se piden.
     response = _strip_invented_args(response, state)
-    # Si el turno anterior pidió params obligatorios, recuperamos los args ya
-    # conocidos para que el LLM solo necesite aportar los nuevos. Sin esto, los
-    # modelos cuantizados pierden el contexto y reabren el bucle de preguntas.
+    # Si el turno anterior pidió obligatorios, recuperamos los args ya conocidos para que el LLM solo aporte los nuevos.
     response = _merge_with_pending_params(response, state)
-    # Canonicaliza los enums código=nombre (distribution_type, trend_type) según
-    # lo que el usuario nombró: corrige el código si el modelo lo mapeó mal
-    # (p. ej. "normal" → 1, no 2). Va tras el merge para ver también el código
-    # recogido en un turno anterior.
+    # Canonicaliza los enums código=nombre según lo que el usuario nombró (corrige un código mal mapeado). Va tras el merge para ver también el de un turno anterior.
     response = _resolve_enum_codes(response, state)
 
-    # Evento llm_call: tokens, tokens/s y si actuó el parser de fallback.
-    # No-op cuando el subsistema de observabilidad está apagado.
+    # Evento llm_call (tokens, tokens/s, parser de fallback); no-op si la observabilidad está apagada.
     emit_llm_call(
         name="razonador.llm",
         messages=messages,
@@ -1322,15 +1021,11 @@ def razonador_node(state: AgentState) -> dict:
     # Detectar si hay una tool call y si le faltan parámetros
     tool_calls = getattr(response, "tool_calls", None) or []
 
-    # Citas trazables: cuando el razonador cierra el ciclo RAG con la
-    # respuesta final (texto, sin tool call), se anexa la sección Fuentes de
-    # forma determinista a partir del contexto que devolvió consultar_teoria.
+    # Citas trazables: al cerrar el ciclo RAG con la respuesta final, se anexa la sección Fuentes a partir del contexto de consultar_teoria.
     if not tool_calls and last_tool == "consultar_teoria":
         _append_fuentes(response, messages)
     elif not tool_calls and last_tool in ANALYTICAL_TOOL_NAMES:
-        # Fidelidad numérica (RF-11): verifica que los valores deterministas del
-        # ToolMessage analítico aparecen en la síntesis; si faltan, reintenta la
-        # generación una sola vez. Nunca rompe el flujo si la verificación falla.
+        # Fidelidad numérica (RF-11): verifica que los valores del ToolMessage aparecen en la síntesis y reintenta una vez si faltan.
         response = _verify_and_repair(response, messages)
         updates["messages"] = [response]
 
@@ -1339,13 +1034,7 @@ def razonador_node(state: AgentState) -> dict:
         tool_name = call.get("name", "") if isinstance(call, dict) else getattr(call, "name", "")
         args = call.get("args", {}) if isinstance(call, dict) else getattr(call, "args", {})
 
-        # Herencia genérica desde session_facts: rellena los parámetros de las
-        # familias semánticas (temporal_window, data_source, series_identity)
-        # que ya estén establecidos en sesión y que la tool destino acepte en su
-        # firma. Complementa a _strip_invented_args: aquel ya retiró los args
-        # inventados; este restaura los que el usuario sí estableció antes.
-        # Excepción: consultar_teoria se exime — su `query` la reformula el LLM
-        # libremente y no hay herencia útil entre turnos teóricos.
+        # Herencia genérica desde session_facts: rellena los parámetros de familias semánticas ya establecidos que la tool acepte. consultar_teoria se exime.
         session_facts = state.get("session_facts") or {}
         if tool_name != "consultar_teoria":
             enriched_args, inherited = _inherit_from_session(tool_name, args, session_facts)
@@ -1366,11 +1055,7 @@ def razonador_node(state: AgentState) -> dict:
                 updates["messages"] = [response]
                 args = enriched_args
 
-        # Descarta los placeholders vacíos antes de evaluar faltantes, persistir
-        # `pending_params` o ejecutar: si quedaran, viajarían literalmente a la
-        # tool (p. ej. `end_date=""` junto a `periods`, que la API rechaza como
-        # "no ambos"). Reconstruimos la tool call para que el ToolNode reciba los
-        # args limpios y `pending_params` no acumule vacíos entre turnos.
+        # Descarta los placeholders vacíos antes de evaluar faltantes o ejecutar (end_date="" junto a periods haría fallar la API con "no ambos").
         cleaned = _drop_empty_args(args)
         if cleaned != args:
             call_id = (
@@ -1393,17 +1078,11 @@ def razonador_node(state: AgentState) -> dict:
         missing_groups = get_missing_alternative_groups(tool_name, args)
 
         if missing or missing_groups:
-            # Faltan obligatorios o un grupo "uno-de" (p. ej. periods|end_date
-            # en las tools sintéticas): pedirlos al usuario. La confirmación
-            # de opcionales se hará en el siguiente ciclo, una vez resueltos.
+            # Faltan obligatorios o un grupo "uno-de": pedirlos al usuario. La confirmación de opcionales irá en el siguiente ciclo.
             updates["pending_tool"] = tool_name
             updates["pending_params"] = args
         else:
-            # Obligatorios completos. Antes de ejecutar, confirmamos con el
-            # usuario los tunables (umbrales, bins, coeficientes…) que no haya
-            # fijado explícitamente. Solo preguntamos una vez por tool_name:
-            # `optionals_confirmed_for` se setea aquí y se limpia al proceder
-            # a la ejecución en el siguiente turno.
+            # Obligatorios completos. Antes de ejecutar confirmamos los tunables no fijados, una sola vez por tool_name (optionals_confirmed_for).
             already_confirmed = state.get("optionals_confirmed_for") == tool_name
             missing_tunable = get_missing_tunable_params(tool_name, args)
 

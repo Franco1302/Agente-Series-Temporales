@@ -1,19 +1,9 @@
 """Recuperacion RAG unificada: densa, MMR o hibrida (densa + BM25 con RRF).
 
-``recuperar_documentos`` es el punto de entrada unico de recuperacion del
-sistema: segun ``RAG_SEARCH_TYPE`` aplica busqueda densa por similitud, MMR
-(diversidad) o busqueda **hibrida**. La hibrida fusiona la lista densa con una
-lista lexica BM25 mediante **Reciprocal Rank Fusion** ponderado.
-
-Restriccion del Bloque 2: 100 % local, sin modelos extra ni red para la parte
-lexica. BM25 (``rank-bm25``, Python puro) se construye en memoria sobre el
-texto ya persistido en Chroma; el indice se cachea por proceso (``lru_cache``)
-porque el corpus es pequeno y estatico entre ingestas.
-
-Por que RRF propio en vez de ``EnsembleRetriever``: evita arrastrar
-``langchain``/``langchain-community`` y su friccion con ``langchain-core`` 1.3.x
-ya instalado. RRF es ademas independiente de la escala de los scores (combina
-rangos, no puntuaciones), lo que encaja con mezclar distancia coseno y BM25.
+recuperar_documentos es el punto de entrada unico: segun RAG_SEARCH_TYPE aplica
+similitud densa, MMR (diversidad) o hibrida (fusiona la lista densa y la lexica
+BM25 con Reciprocal Rank Fusion ponderado). 100% local; el indice BM25 (rank-bm25,
+Python puro) se construye en memoria sobre Chroma y se cachea por proceso.
 """
 
 from __future__ import annotations
@@ -35,14 +25,9 @@ from src.rag_engine.retriever import (
     get_vector_store,
 )
 
-# Constante de amortiguacion de Reciprocal Rank Fusion (Cormack et al., 2009).
-# El valor "estandar" 60 se penso para rankings profundos (miles de docs); con
-# este corpus pequeno y fetch_k bajo aplana en exceso los rangos y degrada la
-# recuperacion. El barrido de docs/rag_evaluation midio que 5 es el mejor para
-# este corpus; se deja configurable via RAG_RRF_K.
+# Amortiguacion de Reciprocal Rank Fusion: el barrido midio 5 como optimo para este corpus pequeno (el estandar 60 aplana los rangos); configurable via RAG_RRF_K.
 DEFAULT_RRF_K = 5
-# Pesos por defecto de la fusion hibrida: (densa, lexica). El barrido eligio
-# 0.7/0.3 (la densa es la senal mas fiable; BM25 rescata consultas por palabra).
+# Pesos por defecto de la fusion hibrida (densa, lexica): el barrido eligio 0.7/0.3 (densa mas fiable; BM25 rescata consultas por palabra).
 DEFAULT_HYBRID_WEIGHTS = (0.7, 0.3)
 
 
@@ -54,13 +39,7 @@ def _tokenize(text: str) -> list[str]:
 
 @lru_cache(maxsize=1)
 def _load_bm25_index() -> tuple[BM25Okapi, tuple[Document, ...]]:
-    """Construye (una vez por proceso) el indice BM25 sobre todo el corpus Chroma.
-
-    Lee el texto y la metadata de cada chunk con ``collection.get`` y los
-    reconstruye como ``Document`` para que la fusion devuelva documentos con
-    trazabilidad completa. Cacheado: el corpus es pequeno y no cambia salvo
-    re-ingesta (que implica reiniciar el proceso).
-    """
+    """Construye (una vez por proceso) el indice BM25 sobre todo el corpus Chroma, reconstruyendo cada chunk como Document para conservar la trazabilidad."""
     store = get_vector_store()
     raw = store.get(include=["documents", "metadatas"])
     contents = raw.get("documents") or []
@@ -83,7 +62,7 @@ def _load_bm25_index() -> tuple[BM25Okapi, tuple[Document, ...]]:
 
 
 def _doc_key(document: Document) -> str:
-    """Clave estable para fusionar listas: ``chunk_id`` si existe; si no, el texto."""
+    """Clave estable para fusionar listas: chunk_id si existe; si no, el texto."""
     chunk_id = (document.metadata or {}).get("chunk_id")
     if chunk_id:
         return str(chunk_id)
@@ -91,7 +70,7 @@ def _doc_key(document: Document) -> str:
 
 
 def _bm25_search(query: str, top_n: int) -> list[Document]:
-    """Recupera los ``top_n`` documentos de mayor puntuacion BM25 para la query."""
+    """Recupera los top_n documentos de mayor puntuacion BM25 para la query."""
     query_tokens = _tokenize(query)
     if not query_tokens:
         return []
@@ -106,12 +85,7 @@ def _rrf_fuse(
     top_k: int,
     rrf_k: int,
 ) -> list[Document]:
-    """Fusiona varias listas rankeadas con Reciprocal Rank Fusion ponderado.
-
-    Para cada documento suma, por lista, ``peso / (rrf_k + rango)``. Combina
-    rangos (no scores), asi que es inmune a que distancia coseno y BM25 vivan
-    en escalas distintas.
-    """
+    """Fusiona varias listas rankeadas con Reciprocal Rank Fusion ponderado (suma peso/(rrf_k+rango) por documento); combina rangos, no scores, inmune a escalas distintas."""
     scores: dict[str, float] = {}
     doc_by_key: dict[str, Document] = {}
     for documents, weight in ranked_lists:
@@ -124,7 +98,7 @@ def _rrf_fuse(
 
 
 def _read_hybrid_weights() -> tuple[float, float]:
-    """Lee ``RAG_HYBRID_WEIGHTS`` ('densa,lexica'); default ``(0.5, 0.5)``."""
+    """Lee RAG_HYBRID_WEIGHTS ('densa,lexica'); default DEFAULT_HYBRID_WEIGHTS."""
     raw = os.getenv("RAG_HYBRID_WEIGHTS")
     if not raw or not raw.strip():
         return DEFAULT_HYBRID_WEIGHTS
@@ -142,7 +116,7 @@ def _read_hybrid_weights() -> tuple[float, float]:
 
 
 def resolve_search_type(search_type: str | None = None) -> str:
-    """Resuelve el modo de busqueda efectivo (argumento > ``RAG_SEARCH_TYPE`` > default)."""
+    """Resuelve el modo de busqueda efectivo (argumento > RAG_SEARCH_TYPE > default)."""
     resolved = (search_type or os.getenv("RAG_SEARCH_TYPE") or DEFAULT_SEARCH_TYPE)
     resolved = resolved.strip().lower() or DEFAULT_SEARCH_TYPE
     return resolved if resolved in _VALID_SEARCH_TYPES else DEFAULT_SEARCH_TYPE
@@ -153,15 +127,7 @@ def recuperar_documentos(
     top_k: int = 4,
     search_type: str | None = None,
 ) -> list[Document]:
-    """Punto de entrada unico de recuperacion RAG. Devuelve hasta ``top_k`` Documentos.
-
-    Segun el modo resuelto (``search_type`` o ``RAG_SEARCH_TYPE``):
-      - ``similarity``: busqueda densa por similitud de coseno.
-      - ``mmr``: busqueda densa con Maximal Marginal Relevance (diversifica).
-      - ``hybrid``: fusiona la lista densa y la lexica (BM25) con Reciprocal
-        Rank Fusion ponderado por ``RAG_HYBRID_WEIGHTS``; cada canal aporta
-        ``RAG_FETCH_K`` candidatos antes de fusionar.
-    """
+    """Punto de entrada unico de recuperacion RAG; devuelve hasta top_k Documentos segun el modo resuelto: similarity (densa por coseno), mmr (densa diversificada) o hybrid (fusiona densa + BM25 lexico con RRF)."""
     clean_query = query.strip()
     if not clean_query or top_k <= 0:
         return []

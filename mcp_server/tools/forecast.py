@@ -136,9 +136,6 @@ async def forecast_time_series(
         error_endpoint = _ERROR_ENDPOINT
         filename, content, mime = open_csv_for_upload(inp.file_path)
 
-        # El backend revienta con 500 si la frequency pasada no coincide con la
-        # inferida del índice. Normalizo: override de frequency y, si las fechas
-        # son "start of period" (MS/QS/YS), reescribo el CSV al "end".
         content, inferred = _normalize_csv_for_backend(content, inp.index_column)
         if inferred and inferred != inp.frequency:
             inp = inp.model_copy(update={"frequency": inferred})
@@ -175,13 +172,12 @@ async def forecast_time_series(
                     err_response.raise_for_status()
                     try:
                         metrics = err_response.json()
-                    except Exception:  # noqa: BLE001 — JSON ilegible: guardamos el texto
+                    except Exception:  # noqa: BLE001
                         metrics = {"raw": err_response.text[:500]}
-                except Exception:  # noqa: BLE001 — métricas opcionales: no abortan la tool
+                except Exception:  # noqa: BLE001
                     metrics = None
 
             if inp.with_plot:
-                # Best-effort: el CSV ya es válido; un fallo de /Plot no debe abortar la tool.
                 try:
                     plot_response = await client.post(
                         f"/Plot{datos_endpoint}",
@@ -191,7 +187,7 @@ async def forecast_time_series(
                     plot_response.raise_for_status()
                     png_path = _SETTINGS.workspace_dir / out_name.replace(".csv", ".png")
                     png_path.write_bytes(plot_response.content)
-                except Exception:  # noqa: BLE001 — la gráfica es opcional
+                except Exception:  # noqa: BLE001
                     png_path = None
 
         result = {
