@@ -1,7 +1,6 @@
 """Tests de integración contra la API drift-detection real.
 
-Requiere que la API esté arrancada en DRIFT_API_URL (por defecto http://localhost:8017).
-Saltan automáticamente si la API no responde.
+Requieren la API en DRIFT_API_URL (def. http://localhost:8017); saltan si no responde.
 
 Ejecutar con:
     PYTHONPATH=. pytest -m integration -v
@@ -55,7 +54,7 @@ def ensure_api_alive():
     try:
         r = httpx.get(_API_URL + "/", timeout=3.0)
         r.raise_for_status()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         pytest.skip(f"API no disponible en {_API_URL}: {exc}", allow_module_level=False)
 
 

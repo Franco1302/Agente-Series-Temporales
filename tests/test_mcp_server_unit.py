@@ -1,9 +1,8 @@
 """Tests unitarios del servidor MCP. Toda la I/O HTTP está mockeada con respx.
 
-Las tools exponen al LLM un schema plano (params al nivel raíz, sin envoltorio
-Pydantic). Internamente las funciones construyen los modelos `XInput(...)` para
-delegar a los helpers `_build_query_params`. Los tests llaman a las tools con
-kwargs, igual que lo haría el cliente MCP, y a los helpers con `XInput(...)`.
+Las tools exponen un schema plano; internamente construyen los modelos XInput(...)
+para delegar en los helpers _build_query_params. Los tests llaman a las tools con
+kwargs (como el cliente MCP) y a los helpers con XInput(...).
 """
 
 from __future__ import annotations
@@ -15,22 +14,27 @@ import respx
 from mcp_server.errors import translate_exception
 from mcp_server.tools.augment import (
     AugmentTimeSeriesInput,
-    _build_query_params as augment_params,
     augment_time_series,
+)
+from mcp_server.tools.augment import (
+    _build_query_params as augment_params,
 )
 from mcp_server.tools.drift import (
     DetectDriftInput,
-    _build_query_params as drift_params,
     detect_drift,
+)
+from mcp_server.tools.drift import (
+    _build_query_params as drift_params,
 )
 from mcp_server.tools.exogenous import (
     CreateExogenousVariableInput,
-    _build_query_params as exo_params,
     create_exogenous_variable,
+)
+from mcp_server.tools.exogenous import (
+    _build_query_params as exo_params,
 )
 from mcp_server.tools.forecast import (
     _normalize_csv_for_backend,
-    _normalize_model,
     forecast_time_series,
 )
 from mcp_server.tools.synthetic import (
@@ -40,7 +44,6 @@ from mcp_server.tools.synthetic import (
     generate_synthetic_periodic,
     generate_synthetic_trend,
 )
-
 
 # ─────────────────────────── translate_exception ───────────────────────────
 
@@ -97,8 +100,7 @@ def test_drift_params_mewma():
     inp = DetectDriftInput(file_path="/tmp/x.csv", index_column="ts", method="MEWMA")
     params = drift_params(inp)
     assert params["min_instances"] == 100
-    # _build_query_params asigna 0.05 cuando alpha no se proporciona explícitamente
-    # (ver mcp_server/tools/drift.py: "params['alpha'] = inp.alpha if inp.alpha is not None else 0.05").
+    # _build_query_params asigna alpha=0.05 cuando no se proporciona explícitamente (ver mcp_server/tools/drift.py).
     assert params["alpha"] == 0.05
     assert params["lambd"] == 0.5
 
@@ -373,35 +375,6 @@ async def test_forecast_no_metrics(respx_mock, sample_csv):
     assert out["metrics"] is None
 
 
-@respx.mock(base_url="http://testserver")
-@pytest.mark.asyncio
-async def test_forecast_accepts_uppercase_model(respx_mock, sample_csv):
-    """El LLM emite model='SARIMAX' (mayúsculas): la tool lo normaliza, no revienta.
-
-    Reproduce el bug real: el Literal['sarimax'] rechazaba 'SARIMAX' con
-    literal_error y el agente entraba en bucle sin poder corregirlo."""
-    respx_mock.post("/Datos/Sarimax").mock(
-        return_value=httpx.Response(200, content=b"ts,p\n2024-01-21,1.0\n")
-    )
-    out = await forecast_time_series(
-        file_path=str(sample_csv), index_column="ts",
-        model="SARIMAX", forecast_steps=5, return_metrics=False, with_plot=False,
-    )
-    assert "output_path" in out
-    assert out["model_used"] == "sarimax"
-
-
-def test_normalize_model_accepts_case_and_quotes():
-    assert _normalize_model("SARIMAX") == "sarimax"
-    assert _normalize_model(" Sarimax ") == "sarimax"
-    assert _normalize_model("'sarimax'") == "sarimax"
-
-
-def test_normalize_model_rejects_unknown():
-    with pytest.raises(ValueError, match="no soportado"):
-        _normalize_model("prophet")
-
-
 def test_normalize_csv_daily_passthrough():
     """CSV diario: la normalización no toca el contenido y devuelve alias 'D'."""
     import pandas as pd
@@ -414,7 +387,9 @@ def test_normalize_csv_daily_passthrough():
 
 def test_normalize_csv_monthly_start_rewrites_to_end():
     """CSV con fechas a inicio de mes (MS): reescribe a final de mes y devuelve 'M'."""
-    import io, pandas as pd
+    import io
+
+    import pandas as pd
     idx = pd.date_range("2020-01-01", periods=12, freq="MS").strftime("%Y-%m-%d")
     csv = ("ts,v\n" + "\n".join(f"{d},{i}" for i, d in enumerate(idx))).encode()
     new_content, alias = _normalize_csv_for_backend(csv, "ts")

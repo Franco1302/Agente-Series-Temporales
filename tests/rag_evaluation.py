@@ -1,37 +1,15 @@
 """Bateria de evaluacion de la recuperacion RAG (precision@k / recall@k / MRR).
 
-Ejecutable como modulo:
+Dataset de 20 preguntas de DECISION ("que metodo uso cuando..."): un chunk cuenta
+como relevante (proxy lexico) si contiene alguno de los terminos esperados; el total
+de relevantes se obtiene escaneando la coleccion Chroma. Las preguntas sin soporte
+(total_relevant==0) se marcan SIN-CORPUS y se excluyen de las medias. Con --label la
+corrida se persiste en docs/rag_evaluation/ (snapshot por pregunta + summary
+antes/despues) y se compara contra --compare-to.
 
-    python -m tests.rag_evaluation --label baseline   # corrida etiquetada
-    python -m tests.rag_evaluation --label mmr        # otra corrida a comparar
+Uso:
+    python -m tests.rag_evaluation --label baseline
     python -m tests.rag_evaluation --k 8 --label hybrid
-    python -m tests.rag_evaluation                    # corrida rapida sin guardar
-
-El dataset son 20 pares ``(pregunta, terminos_de_metodo_esperados)`` centrados
-en DECISION: cada pregunta plantea "que metodo uso cuando...". El objetivo es
-medir si la recuperacion trae los fragmentos del metodo correcto.
-
-Proxy de relevancia (documentado y asumido por el corpus pequeno):
-    Un chunk recuperado cuenta como RELEVANTE si su contenido contiene, en
-    minusculas, alguno de los terminos esperados de la pregunta. El total de
-    chunks relevantes del corpus se obtiene escaneando la coleccion Chroma
-    completa (``vector_store.get()``). Es un proxy lexico: no mide relevancia
-    semantica fina, pero es estable, reproducible y suficiente para comparar
-    una configuracion de recuperacion contra otra.
-
-Preguntas sin soporte en el corpus (total_relevant == 0) se marcan
-``SIN-CORPUS`` y se excluyen de las medias: penalizar la recuperacion por una
-laguna del corpus falsearia la comparacion. Sirven ademas como senal de que
-contenido falta por redactar en la guia de seleccion.
-
-Persistencia para comparacion antes/despues (carpeta ``docs/rag_evaluation/``):
-    Con ``--label NOMBRE`` la corrida se persiste de forma versionable:
-      * ``docs/rag_evaluation/snapshot_<label>.csv`` -> detalle por pregunta.
-      * ``docs/rag_evaluation/summary.csv``          -> una fila de medias por
-        etiqueta (upsert). Es la tabla antes/despues que documenta, en la
-        memoria del TFG, por que se tomo cada decision sobre la recuperacion.
-    Tras cada corrida se compara automaticamente contra la etiqueta indicada
-    en ``--compare-to`` (por defecto ``baseline``) y se imprime el delta.
 """
 
 from __future__ import annotations
@@ -42,7 +20,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -56,9 +34,7 @@ SUMMARY_FIELDS = [
     "precision_at_k", "recall_at_k", "mrr",
 ]
 
-# Dataset de evaluacion: (pregunta de decision, terminos de metodo esperados).
-# Los terminos se eligen lo mas distintivos posible; los nombres de estrategia
-# generistas ("normal", "statistical") se acompanan de terminos de apoyo.
+# Dataset de evaluacion: (pregunta de decision, terminos de metodo esperados), lo mas distintivos posible.
 EVAL_DATASET: list[tuple[str, tuple[str, ...]]] = [
     # --- Deteccion de drift ---------------------------------------------------
     ("Que test de drift uso con datos univariantes",
@@ -168,12 +144,7 @@ def _evaluate_question(
 
 
 def _retrieve(recuperar_fn, query: str, k: int) -> list[str]:
-    """Recupera los chunks para la query usando el punto de entrada unico RAG.
-
-    Desde el Paso 4 delega en ``hybrid.recuperar_documentos``, que respeta
-    ``RAG_SEARCH_TYPE`` (``similarity`` | ``mmr`` | ``hybrid``). Asi la misma
-    bateria mide cualquiera de los tres modos sin tocar el script.
-    """
+    """Recupera los chunks para la query via hybrid.recuperar_documentos, que respeta RAG_SEARCH_TYPE (similarity | mmr | hybrid)."""
     documents = recuperar_fn(query, top_k=k)
     return [doc.page_content or "" for doc in documents]
 
@@ -205,11 +176,7 @@ def _means(results: list[QuestionResult]) -> dict[str, float]:
 
 
 def _emit_observability(results: list[QuestionResult], k: int) -> bool:
-    """Registra un evento rag_retrieval por pregunta si la observabilidad esta activa.
-
-    Devuelve True si se emitieron eventos. Cualquier fallo se ignora: la
-    observabilidad nunca debe romper la evaluacion.
-    """
+    """Registra un evento rag_retrieval por pregunta si la observabilidad esta activa; devuelve True si se emitieron. Cualquier fallo se ignora."""
     try:
         from src.observability import (
             EVENT_RAG_RETRIEVAL,
@@ -248,7 +215,7 @@ def _emit_observability(results: list[QuestionResult], k: int) -> bool:
                 )
             )
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -301,7 +268,7 @@ def _upsert_summary(
     means = _means(results)
     new_row = {
         "label": label,
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
         "search_type": search_type,
         "k": str(k),
         "n_questions": str(len(results)),

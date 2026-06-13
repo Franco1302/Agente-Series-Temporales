@@ -1,8 +1,4 @@
-"""Punto de entrada del servidor MCP.
-
-Se ejecuta como subproceso del agente vía stdio, lanzado por langchain-mcp-adapters
-con el comando configurado en src/agent/tools/mcp_loader.py.
-"""
+"""Punto de entrada del servidor MCP."""
 
 from __future__ import annotations
 

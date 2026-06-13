@@ -175,7 +175,6 @@ def tool_execution_node(state: AgentState) -> dict:
     last_msg = result_messages[-1] if result_messages else None
 
     if isinstance(last_msg, ToolMessage):
-        # Siempre: retira la telemetría del contenido (aunque obs. esté off).
         data, http_logs = _parse_tool_payload(last_msg)
         ok, result_kind = _classify_result(data)
 
@@ -210,9 +209,7 @@ def tool_execution_node(state: AgentState) -> dict:
 def _current_turn_index(state: AgentState) -> int:
     """Aproxima el ordinal del turno actual contando HumanMessage en el historial.
 
-    Se usa como metadato informativo en ``session_facts["by_param"]`` para que
-    se pueda saber cuándo se introdujo un parámetro. No interviene en la lógica
-    de herencia: si dos tools establecen el mismo parámetro, gana la última.
+    Se usa para etiquetar la fuente de los parámetros heredables en session_facts.
     """
     messages = (state or {}).get("messages") or []
     return sum(1 for m in messages if isinstance(m, HumanMessage))

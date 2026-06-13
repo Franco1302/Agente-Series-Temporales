@@ -1,13 +1,6 @@
 """Hooks de observabilidad HTTP para el servidor MCP (subproceso stdio).
-
-Recogen método, endpoint, código de estado y latencia de cada petición
-``httpx`` a la API REST analítica y los adjuntan al resultado de la tool
-bajo la clave reservada ``_observability``; el lado del agente los extrae
-y emite los eventos ``api_http``.
-
-El subsistema se activa con la variable de entorno ``OBSERVABILITY_ENABLED``,
-heredada del proceso anfitrión vía ``mcp_loader``. Si está desactivada,
-todos los hooks son no-ops y no se añade nada al resultado de la tool.
+El subsistema se activa con  OBSERVABILITY_ENABLED,
+heredada del proceso anfitrión vía mcp_loader
 """
 
 from __future__ import annotations
@@ -64,7 +57,7 @@ def attach_observability(result_dict: dict[str, Any]) -> dict[str, Any]:
     return result_dict
 
 
-# ── Hooks de eventos asíncronos para httpx.AsyncClient ───────────────────────
+#Hooks de eventos asíncronos para httpx.AsyncClient 
 
 async def record_request_start(request: httpx.Request) -> None:
     """Hook que httpx ejecuta inmediatamente antes de enviar la petición."""

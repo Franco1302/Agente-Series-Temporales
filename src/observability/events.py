@@ -34,22 +34,7 @@ def _utc_now_iso() -> str:
 
 @dataclass
 class TraceEvent:
-    """Evento individual de la traza.
-
-    Atributos:
-        trace_id: Identificador del turno (compartido por todos los
-            eventos del mismo turno conversacional).
-        thread_id: Identificador de la sesión Streamlit.
-        name: Nombre descriptivo libre (p. ej. ``"razonador"``,
-            ``"llm.invoke"``, ``"detect_drift"``).
-        event_type: Una de las constantes ``EVENT_*`` definidas arriba.
-        timestamp: ISO 8601 UTC; se autocompleta al instanciar.
-        span_id: Identificador del span al que pertenece el evento.
-        parent_span_id: Span padre (si el evento estaba dentro de otro).
-        duration_ms: Duración asociada en milisegundos (cuando aplica).
-        attributes: Diccionario libre con campos específicos por
-            ``event_type``. Debe ser JSON-serializable.
-    """
+    """Evento individual de la traza."""
 
     trace_id: Optional[str]
     thread_id: Optional[str]

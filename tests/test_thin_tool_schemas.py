@@ -1,13 +1,9 @@
 """Tests del schema fino que ve el modelo (Parte 2, Opción A).
 
-`thin_tool_schemas` adelgaza el schema de las herramientas analíticas que se
-envía al LLM: conserva nombre, descripción de la tool y nombres+tipos de los
-parámetros, pero quita description/enum/default por parámetro y marca todos como
-opcionales (``required: []``). Así el modelo SELECCIONA la tool pero no puede
-"rellenar" sus parámetros: la recogida se centraliza en el nodo de petición.
-
-`consultar_teoria` (RAG, no analítica) queda intacta porque su ``query`` la
-reformula el LLM legítimamente.
+thin_tool_schemas adelgaza el schema de las tools analíticas enviado al LLM: conserva
+nombre, descripción y nombres+tipos de parámetros, pero quita description/enum/default
+y marca todo opcional (required: []), así el modelo SELECCIONA la tool pero no rellena
+parámetros. consultar_teoria (RAG) queda intacta porque su query la reformula el LLM.
 """
 
 from __future__ import annotations
@@ -48,8 +44,7 @@ def test_analytical_tools_are_thinned_and_rag_is_not():
 
 
 def test_thin_schema_keeps_param_names_for_selection():
-    """Conservar los nombres de parámetro no es relleno: ayuda a pasar lo que el
-    usuario escribió. Verificamos que siguen presentes (p. ej. detect_drift)."""
+    """Los nombres de parámetro se conservan (no son relleno): verificamos que siguen presentes (p. ej. detect_drift)."""
     payload = thin_tool_schemas(AGENT_TOOLS, ANALYTICAL_TOOL_NAMES)
     indexed = _by_name(payload)
     props = indexed["detect_drift"][1]["function"]["parameters"]["properties"]

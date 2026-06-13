@@ -1,0 +1,10 @@
+# Configuración de ruff (linter). Caché en .ruff_cache/ (ya en .gitignore).
+target-version = "py312"
+line-length = 120
+
+[lint]
+# F=pyflakes, E/W=pycodestyle, I=isort, B=bugbear, BLE=blind-except, UP=pyupgrade, C4=comprehensions.
+# Coherente con los `# noqa` ya presentes en el código (BLE001, E731, E402, F401).
+select = ["E", "W", "F", "I", "B", "BLE", "UP", "C4"]
+# E501 (línea demasiado larga): desactivada a propósito; hay comentarios de una línea largos por diseño.
+ignore = ["E501"]

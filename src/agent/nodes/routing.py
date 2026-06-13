@@ -15,13 +15,7 @@ def route_after_razonador(state: AgentState) -> str:
     - Si el LLM emitió tool_call para consultar_teoria → recuperar_contexto
     - Si el LLM emitió tool_call pero faltan parámetros  → solicitar_parametros
     - Si el LLM emitió tool_call completa               → ejecutar_herramienta
-    - Si el LLM respondió directamente (sin tool_calls)  → fin (END)
-
-    El razonador ya produjo la respuesta final; volver a invocar al LLM en
-    `generar_respuesta` doblaría el tiempo y suele devolver content vacío
-    porque el modelo ve que ya hay un AIMessage con la respuesta.
-    `generar_respuesta` queda reservado para el camino de error.
-    """
+    - Si el LLM respondió directamente (sin tool_calls)  → fin (END)"""
     messages = state.get("messages", [])
     if not messages:
         return "fin"

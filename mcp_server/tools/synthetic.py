@@ -239,7 +239,7 @@ class GenerateTrendInput(BaseModel):
         return self
 
 
-# ───────────────────────── 1. generate_synthetic_distribution ─────────────────────────
+#generate_synthetic_distribution 
 
 @mcp.tool()
 async def generate_synthetic_distribution(
@@ -353,7 +353,7 @@ async def generate_synthetic_distribution(
         return attach_observability(error_result)
 
 
-# ───────────────────────── 2. generate_synthetic_arma ─────────────────────────
+# 2. generate_synthetic_arma
 
 @mcp.tool()
 async def generate_synthetic_arma(
@@ -477,7 +477,7 @@ async def generate_synthetic_arma(
         return attach_observability(error_result)
 
 
-# ───────────────────────── 3. generate_synthetic_periodic ─────────────────────────
+# 3. generate_synthetic_periodic 
 
 @mcp.tool()
 async def generate_synthetic_periodic(
@@ -601,7 +601,7 @@ async def generate_synthetic_periodic(
         error_result = {"error": translate_exception(exc, "generate_synthetic_periodic")}
         return attach_observability(error_result)
 
-# ───────────────────────── 4. generate_synthetic_trend ─────────────────────────
+# 4. generate_synthetic_trend 
 
 @mcp.tool()
 async def generate_synthetic_trend(

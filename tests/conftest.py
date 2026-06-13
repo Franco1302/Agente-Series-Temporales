@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 _TOOL_MODULES = (
     "mcp_server.tools.drift",
     "mcp_server.tools.synthetic",
@@ -19,12 +18,7 @@ _TOOL_MODULES = (
 
 @pytest.fixture(autouse=True)
 def isolated_workspace(tmp_path, monkeypatch):
-    """Aísla el workspace y la API URL de cada test.
-
-    Las tools cachean `_SETTINGS = load_settings()` al cargar el módulo, así que
-    además de exportar las env vars hay que parchear directamente la variable
-    `_SETTINGS` de cada módulo de tools.
-    """
+    """Aísla el workspace y la API URL de cada test parcheando _SETTINGS en cada módulo de tools (lo cachean al cargar, no basta con las env vars)."""
     monkeypatch.setenv("DRIFT_API_URL", "http://testserver")
     monkeypatch.setenv("MCP_WORKSPACE_DIR", str(tmp_path))
 

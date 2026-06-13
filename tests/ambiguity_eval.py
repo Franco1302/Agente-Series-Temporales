@@ -1,54 +1,19 @@
-"""Batería de ambigüedad (Tarea 2 del brief del Capítulo 6).
+"""Batería de ambigüedad (Tarea 2 del Capítulo 6).
 
-Mide cómo se comporta el agente ante peticiones incompletas o ambiguas frente
-al modelo y a las herramientas reales (no se *mockea* nada). Produce dos CSVs
-en ``tests/results/``:
+Mide el comportamiento del agente ante peticiones incompletas o ambiguas contra el
+modelo y las tools reales (no mockea nada). Escribe dos CSV en tests/results/:
+scorecard (una fila por caso/repetición) y summary (tasas por case_type: invention,
+correct_ask, over_ask, routing_accuracy), con run_id/model/temperature/commit por fila.
+Los casos viven en tests/data/ambiguity_cases.json con taxonomía missing_param,
+ambiguous_tool, theory_vs_op, out_of_scope, implicit_context. El nodo alcanzado
+(reached_route) se clasifica priorizando solicitar_parametros > recuperar_contexto >
+ejecutar_herramienta > fin_texto.
 
-  * ``ambiguity_scorecard.csv``  — una fila por (caso, repetición).
-  * ``ambiguity_summary.csv``    — una fila por ``case_type`` y un agregado
-                                   global con las cuatro tasas (invention,
-                                   correct_ask, over_ask, routing_accuracy).
+Uso:
+    python -m tests.ambiguity_eval --model qwen2.5:3b-instruct-q4_K_M --reps 5
+    python -m tests.ambiguity_eval --reps 1 --cases MP-01 TH-02   # smoke test
 
-Cada fila lleva ``run_id``, ``model``, ``temperature`` y ``commit`` para que
-sea reproducible y comparable entre corridas.
-
-Casos
------
-Definidos en ``tests/data/ambiguity_cases.json`` con taxonomía:
-
-  * ``missing_param``    — petición a la que faltan datos obligatorios.
-  * ``ambiguous_tool``   — petición compatible con varias herramientas.
-  * ``theory_vs_op``     — pregunta teórica (debe ir por ``recuperar_contexto``).
-  * ``out_of_scope``     — petición fuera del dominio (debe declinar en texto).
-  * ``implicit_context`` — petición que reusa el turno anterior; el harness
-                           reproduce el turno previo en el mismo ``thread_id``.
-
-Métricas
---------
-  * ``invention_rate``   = fracción de filas donde el LLM emitió una tool call
-                          incluyendo algún parámetro listado en
-                          ``forbidden_invent`` de su caso. **Debe tender a 0.**
-  * ``correct_ask_rate`` = entre las filas con ``must_ask=true``, fracción
-                          donde el agente alcanzó ``solicitar_parametros``.
-  * ``over_ask_rate``    = entre las filas con ``must_ask=false``, fracción
-                          donde el agente alcanzó ``solicitar_parametros``.
-  * ``routing_accuracy`` = fracción donde el nodo alcanzado coincide con
-                          ``expected_route``.
-
-Etiquetas de ``reached_route``: ``solicitar_parametros``,
-``recuperar_contexto``, ``ejecutar_herramienta``, ``fin_texto`` (texto sin
-tool call). El clasificador inspecciona la secuencia de nodos del ``stream``
-del grafo y prioriza en este orden.
-
-Uso
----
-  python -m tests.ambiguity_eval --model qwen2.5:3b-instruct-q4_K_M --reps 5
-  python -m tests.ambiguity_eval --reps 1 --cases MP-01 TH-02   # smoke test
-  python -m tests.ambiguity_eval --reps 5 --csv-out other.csv --summary-out s.csv
-
-Requiere Ollama corriendo y la API MCP arrancada (las tools se conectan al
-servidor real). La batería NO mockea ni el LLM ni las herramientas, por
-diseño: queremos medir el comportamiento end-to-end.
+Requiere Ollama y la API MCP arrancadas (mide el comportamiento end-to-end).
 """
 
 from __future__ import annotations
@@ -154,18 +119,12 @@ def _stream_turn(graph, state: dict, config: dict) -> TurnTrace:
     return TurnTrace(visited, tc_name, tc_args, final_text)
 
 
-# El orden de prioridad refleja el grafo: si pasamos por solicitar_parametros
-# es porque el flujo terminó pidiendo datos; si pasamos por recuperar_contexto
-# pero acabamos en texto, fue una respuesta teórica vía RAG; etc.
+# Orden de prioridad que refleja el grafo: el primer nodo visitado de esta lista determina la ruta clasificada.
 _ROUTE_PRIORITY = ("solicitar_parametros", "recuperar_contexto", "ejecutar_herramienta")
 
 
 def _classify_route(trace: TurnTrace) -> str:
-    """Devuelve la etiqueta de ``reached_route`` a partir de los nodos visitados.
-
-    Si el flujo no pasó por ninguno de los nodos prioritarios, el turno acabó
-    en texto plano y devolvemos ``fin_texto``.
-    """
+    """Devuelve la etiqueta de reached_route a partir de los nodos visitados; fin_texto si no pasó por ninguno prioritario."""
     visited = set(trace.visited_nodes)
     for label in _ROUTE_PRIORITY:
         if label in visited:
@@ -180,11 +139,7 @@ _FIXTURE_CSV_PATH: str | None = None
 
 
 def _build_fixture_csv() -> str:
-    """Genera un CSV real con ``generate_synthetic_distribution`` y devuelve su ruta.
-
-    Sigue el principio de `feedback_test_data_via_api`: los inputs se generan
-    llamando a la propia API en vez de duplicar lógica en numpy/pandas.
-    """
+    """Genera un CSV real con generate_synthetic_distribution y devuelve su ruta (los inputs se generan llamando a la propia API, no duplicando lógica en numpy/pandas)."""
     global _FIXTURE_CSV_PATH
     if _FIXTURE_CSV_PATH is not None and Path(_FIXTURE_CSV_PATH).exists():
         return _FIXTURE_CSV_PATH
@@ -222,22 +177,15 @@ def run_one(
     ablation: Any = None,
     verbose: bool = False,
 ) -> dict:
-    """Ejecuta una repetición del caso y devuelve un dict con las métricas.
-
-    El parámetro ``ablation`` se reserva para la Tarea 3 (estudio de
-    ablación): cuando es no-None se pasa a ``build_system_prompt`` vía un
-    monkey-patch local. Hoy el grafo construye el prompt directamente desde
-    ``razonador_node``, así que el harness lo monkey-patchea sólo durante el
-    turno; con ``ablation=None`` el flujo es el mismo que en producción.
-    """
+    """Ejecuta una repetición del caso y devuelve un dict con las métricas. ablation (Tarea 3) se aplica via monkey-patch local a build_system_prompt solo durante el turno; con ablation=None el flujo es el de producción."""
     from langchain_core.messages import HumanMessage
+
     from src.agent.graph import build_agent_graph
 
     needs_csv = _needs_csv(case)
     csv_path_state: str | None = csv_fixture if needs_csv else None
 
-    # Reconstruir el grafo para que reciba el LLM con los env vars vigentes
-    # (ver ``main`` — cachea get_chat_ollama y el grafo).
+    # Reconstruir el grafo para que reciba el LLM con los env vars vigentes (get_chat_ollama y el grafo están cacheados).
     build_agent_graph.cache_clear()
     graph = build_agent_graph()
     thread_id = f"amb-{case.id}-{uuid.uuid4().hex[:6]}"
@@ -327,13 +275,7 @@ class _NoopContext:
 
 
 def _patch_ablation_context(ablation: Any):
-    """Devuelve un context manager que parchea ``build_system_prompt`` para que
-    use la ablación pasada, si es no-None. Si es None, devuelve un no-op.
-
-    El parche se aplica al módulo de razonamiento, que es quien hoy llama a
-    ``build_system_prompt`` para inyectar el SystemMessage. Mantener este
-    parche local al turno evita contaminación entre repeticiones.
-    """
+    """Context manager que parchea build_system_prompt en el módulo de razonamiento para usar la ablación pasada (no-op si es None); local al turno para evitar contaminación entre repeticiones."""
     if ablation is None:
         return _NoopContext()
 
@@ -343,8 +285,7 @@ def _patch_ablation_context(ablation: Any):
     original = _reasoning.build_system_prompt
 
     def _patched(*args, _ablation=ablation, _orig=_sp.build_system_prompt, **kwargs):
-        # Reenvía cualquier firma de build_system_prompt (incl. kwargs nuevos
-        # como session_context) y solo fuerza la ablación de esta corrida.
+        # Reenvía cualquier firma de build_system_prompt y solo fuerza la ablación de esta corrida.
         kwargs["ablation"] = _ablation
         return _orig(*args, **kwargs)
 
@@ -434,10 +375,7 @@ def compute_summary(
             over_ask = sum(1 for r in not_must_ask_rows if r["asked_param"]) / len(not_must_ask_rows)
         else:
             over_ask = float("nan")
-        # routing_accuracy: cada caso conoce su expected_route, pero aquí
-        # `r["correct"]` no garantiza solo routing (incluye also invention/ask).
-        # Re-calculamos sobre `reached_route == expected_route` por fila.
-        # Para hacerlo necesitamos expected_route; lo recuperamos del caso.
+        # routing_accuracy se calcula sobre el flag por fila routing_correct (reached_route == expected_route), no sobre r["correct"] que mezcla invention/ask.
         routing_correct = sum(1 for r in rs if r.get("routing_correct")) / n
         mean_dur = sum(r["duration_s"] for r in rs) / n
 
@@ -495,9 +433,7 @@ def _git_short_sha() -> str:
 
 
 def _apply_ollama_env(model: str, temperature: float) -> None:
-    """Exporta OLLAMA_MODEL/OLLAMA_TEMPERATURE y limpia las cachés del LLM
-    para que ``get_chat_ollama`` recree el cliente con los nuevos parámetros.
-    """
+    """Exporta OLLAMA_MODEL/OLLAMA_TEMPERATURE y limpia las cachés para que get_chat_ollama recree el cliente con los nuevos parámetros."""
     os.environ["OLLAMA_MODEL"] = model
     os.environ["OLLAMA_TEMPERATURE"] = str(temperature)
 
@@ -509,10 +445,7 @@ def _apply_ollama_env(model: str, temperature: float) -> None:
 
 
 def _silence_observability() -> None:
-    """Apaga el subsistema de observabilidad para que la corrida no inunde
-    stdout/stderr con JSON. Se usa por defecto en la batería; el opt-in
-    ``--observability`` permite volver a activarla cuando interese trazar.
-    """
+    """Apaga la observabilidad para que la corrida no inunde stdout con JSON; por defecto en la batería, reactivable con --observability."""
     try:
         from src.observability.logger import configure as _obs_configure
         _obs_configure(enabled=False)
@@ -532,11 +465,7 @@ def run_battery(
     extra_row_fields: dict | None = None,
     observability: bool = False,
 ) -> tuple[list[dict], list[dict]]:
-    """Ejecuta la batería entera y persiste scorecard + summary.
-
-    Devuelve (rows, summary_rows) por si el llamador (ej. ablation_eval) los
-    quiere acumular antes de volcar a disco.
-    """
+    """Ejecuta la batería entera y persiste scorecard + summary; devuelve (rows, summary_rows) por si el llamador (ej. ablation_eval) los acumula antes de volcar a disco."""
     _apply_ollama_env(model, temperature)
     if not observability:
         _silence_observability()

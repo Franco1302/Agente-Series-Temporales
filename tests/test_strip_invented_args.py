@@ -1,13 +1,8 @@
-"""Tests de la defensa anti-invención de args en `reasoning._strip_invented_args`.
+"""Tests de la defensa anti-invención de args (reasoning._strip_invented_args).
 
-Cuando el LLM local (cuantizado) viola `RULE_NO_INVENT` y rellena campos
-"obvios" sin que el usuario los haya escrito, esta defensa retira esos args
-antes de la validación para que el grafo los pida explícitamente.
-
-Cobertura: las 8 herramientas analíticas y los tipos de campo definidos en
-`_FIELD_EVIDENCE_MAP` (date, freq, integer, numeric_list, distribution_kind,
-trend_kind, pattern_kind, drift_method, augment_strategy, exogenous_relation,
-existing_column, new_column).
+Cuando el LLM cuantizado rellena campos sin que el usuario los escriba, la defensa
+retira esos args antes de la validación para que el grafo los pida. Cubre las 8 tools
+analíticas y todos los tipos de campo de _FIELD_EVIDENCE_MAP.
 """
 
 from __future__ import annotations
@@ -18,7 +13,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agent.nodes import reasoning as reasoning_mod
 from src.agent.nodes.reasoning import _strip_invented_args
-
 
 # ── Utilidades de fixture ───────────────────────────────────────────────────
 
@@ -265,9 +259,7 @@ def test_keep_index_column_when_user_mentions_it_textually():
 
 
 def test_keep_index_column_from_csv_metadata():
-    # forecast ya no tiene target_column (SARIMAX predice todas las columnas);
-    # index_column lleva el mismo `evidence="existing_column"`, así que cubrimos
-    # el fallback contra csv_metadata con un parámetro real de la tool.
+    # forecast ya no tiene target_column; index_column lleva el mismo evidence="existing_column", así que cubrimos el fallback contra csv_metadata con un parámetro real.
     msg = _tool_call_msg("forecast_time_series", {"index_column": "Indice"})
     state = _state("Predice.", csv_metadata={"columns": ["Indice", "valor"]})
     cleaned = _strip_invented_args(msg, state)
@@ -290,7 +282,7 @@ def test_keep_new_column_when_user_names_it():
 
 
 def test_strip_noop_for_unmapped_tools():
-    """`consultar_teoria` no está en `_FIELD_EVIDENCE_MAP`: no se toca nada."""
+    """consultar_teoria no está en _FIELD_EVIDENCE_MAP: no se toca nada."""
     msg = _tool_call_msg("consultar_teoria", {"query": "qué es drift"})
     cleaned = _strip_invented_args(msg, _state("hola"))
     assert _args_of(cleaned) == {"query": "qué es drift"}
@@ -425,9 +417,7 @@ def test_keep_distribution_params_when_user_mentions_probabilidad():
 
 
 def test_full_invention_only_distribution_type_survives():
-    """Escenario real reportado: el LLM inventa start_date, frequency, periods,
-    distribution_params. Solo distribution_type=1 sobrevive porque "normal" es
-    evidencia textual."""
+    """Escenario real: el LLM inventa start_date, frequency, periods y distribution_params; solo distribution_type=1 sobrevive porque "normal" es evidencia textual."""
     msg = _tool_call_msg(
         "generate_synthetic_distribution",
         {

@@ -1,33 +1,15 @@
 """Benchmark de tiempos del flujo RAG: coste de la doble sintesis de LLM.
 
-Contexto (PlanMejoraRAG, Paso 5): hoy ``consultar_teoria`` recupera contexto y
-**sintetiza una respuesta con el LLM** (sintesis interna); despues el razonador
-del grafo **vuelve a sintetizar** sobre esa respuesta. Son dos pasadas de LLM
-por turno teorico. El Paso 5 elimina la sintesis interna. Este script mide el
-caso ANTES y DESPUES para cuantificar la mejora.
-
-Caso medido: la consulta teorica del caso 5 de ``scripts/test_agent.py``
-(Kolmogorov-Smirnov), que dispara ``consultar_teoria``.
-
-Que mide:
-  1. Micro-medicion aislada (sin grafo):
-       - retrieval_ms      : tiempo de ``recuperar_documentos`` (solo recuperacion).
-       - tool_total_ms     : tiempo de ``consultar_teoria.invoke`` (recuperacion +
-                             sintesis interna).
-       - inner_synthesis_ms: tool_total_ms - retrieval_ms ~= coste de la pasada
-                             de LLM que el Paso 5 elimina.
-  2. Turno completo contra el grafo del agente, con observabilidad activa. De la
-     traza de logs extrae la duracion por nodo (``recuperar_contexto``,
-     ``razonador``) y el total del turno.
+Hoy consultar_teoria recupera contexto y sintetiza con el LLM, y luego el razonador
+vuelve a sintetizar: dos pasadas por turno teorico. El Paso 5 elimina la sintesis
+interna; este script mide ANTES y DESPUES. Toma una micro-medicion aislada
+(retrieval vs tool total) y un turno completo contra el grafo (duracion por nodo).
+Guarda en docs/rag_evaluation/: timing_<label>.json, trace_<label>.jsonl y
+timing_summary.csv (tabla antes/despues).
 
 Uso:
     python -m tests.rag_timing_benchmark --label antes_paso5
     python -m tests.rag_timing_benchmark --label despues_paso5   # tras el Paso 5
-
-Guarda en ``docs/rag_evaluation/`` (datos para la memoria del TFG):
-    timing_<label>.json   -> reporte de tiempos completo.
-    trace_<label>.jsonl   -> traza de logs del turno (trazabilidad reproducible).
-    timing_summary.csv    -> una fila por etiqueta: tabla antes/despues.
 """
 
 from __future__ import annotations
@@ -39,7 +21,7 @@ import os
 import statistics
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -62,7 +44,7 @@ def _median(values: list[float]) -> float:
 
 
 def _measure_retrieval(query: str, repeats: int) -> list[float]:
-    """Tiempos (ms) de la recuperacion pura (``recuperar_documentos``)."""
+    """Tiempos (ms) de la recuperacion pura (recuperar_documentos)."""
     from src.rag_engine.hybrid import recuperar_documentos
 
     keep_top = int(os.getenv("RAG_KEEP_TOP") or 3)
@@ -75,7 +57,7 @@ def _measure_retrieval(query: str, repeats: int) -> list[float]:
 
 
 def _measure_tool(query: str, repeats: int) -> list[float]:
-    """Tiempos (ms) de ``consultar_teoria.invoke`` (recuperacion + sintesis interna)."""
+    """Tiempos (ms) de consultar_teoria.invoke (recuperacion + sintesis interna)."""
     from src.tools.rag_tool import consultar_teoria
 
     times: list[float] = []
@@ -198,7 +180,7 @@ def run_benchmark(label: str, repeats: int) -> int:
 
     report = {
         "label": label,
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
         "query": CASO_QUERY,
         "repeats": repeats,
         "micro_aislado_ms": {
@@ -240,7 +222,7 @@ def run_benchmark(label: str, repeats: int) -> int:
     print(f"  nodo razonador (total)     : {_median(razonador_times):8.0f} ms")
     print(f"  turno completo             : {_median(turn_times):8.0f} ms")
     print("=" * 64)
-    print(f"\nArtefactos para la memoria:")
+    print("\nArtefactos para la memoria:")
     print(f"  - {timing_json.relative_to(PROJECT_ROOT)}")
     print(f"  - {trace_jsonl.relative_to(PROJECT_ROOT)}")
     print(f"  - {TIMING_SUMMARY.relative_to(PROJECT_ROOT)} (tabla antes/despues)")

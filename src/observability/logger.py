@@ -1,9 +1,4 @@
 """Logger singleton del subsistema de observabilidad.
-
-Escribe una línea JSON por evento en ``data/logs/agent.jsonl`` mediante
-un ``RotatingFileHandler``. La función ``emit`` está blindada: cualquier
-excepción dentro del subsistema queda contenida y JAMÁS interrumpe el
-turno conversacional (criterio de aceptación del Bloque 1).
 """
 
 from __future__ import annotations

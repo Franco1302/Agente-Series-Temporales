@@ -1,8 +1,8 @@
 """Tests del detector que decide cuándo forzar la tool call (Parte 2).
 
-`razonador_node` reintenta forzando la tool call cuando el modelo responde en
-prosa a una petición de acción clara. La decisión vive en `_should_force_action`
-y `_looks_like_action_request`, funciones puras (sin LLM) verificadas aquí.
+razonador_node reintenta forzando la tool call cuando el modelo responde en prosa a
+una petición de acción clara. Aquí se verifican las funciones puras (sin LLM)
+_should_force_action y _looks_like_action_request.
 """
 
 from __future__ import annotations

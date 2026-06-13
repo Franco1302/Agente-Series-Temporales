@@ -1,16 +1,4 @@
-"""Decoradores de instrumentación no invasiva para nodos LangGraph.
-
-El decorador :func:`traced_node` envuelve una función de nodo del grafo
-para emitir eventos ``node_enter`` y ``node_exit`` y, en caso de
-excepción, un evento ``error`` adicional. Se aplica en el momento de
-registrar el nodo (``builder.add_node(...)``); no se modifica el cuerpo
-de las funciones de nodo.
-
-El decorador detecta automáticamente si la función envuelta es
-``async def`` (con :func:`asyncio.iscoroutinefunction`) y devuelve un
-wrapper compatible. Hoy todos los nodos son síncronos, pero esto blinda
-la instrumentación frente a futuras refactorizaciones a ``async``.
-"""
+"""Decoradores de instrumentación no invasiva para nodos LangGraph."""
 
 from __future__ import annotations
 

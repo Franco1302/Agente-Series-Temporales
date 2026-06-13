@@ -1,12 +1,4 @@
 """Extracción de métricas del LLM y emisión de eventos `llm_call`.
-
-Los campos extraídos siguen el esquema definido en el plan:
-``model``, ``n_messages_in``, ``prompt_chars``, ``input_tokens``,
-``output_tokens``, ``tokens_per_sec``, ``decided``, ``tool_name``.
-Cuando alguno no se puede obtener (p. ej. el modelo
-local no rellena ``response_metadata`` o falla la división por
-``eval_duration=0``) se devuelve ``None`` en lugar de propagar la
-excepción.
 """
 
 from __future__ import annotations
@@ -29,9 +21,6 @@ def _safe_get(mapping: Any, key: str) -> Any:
 
 def _count_prompt_chars(messages: list) -> int:
     """Devuelve la suma de longitudes de ``.content`` de todos los mensajes.
-
-    Soporta el caso (poco común con Ollama) en que ``content`` es una lista
-    de bloques tipo ``[{"type": "text", "text": "..."}]``.
     """
     total = 0
     for msg in messages:
@@ -120,12 +109,6 @@ def emit_llm_call(
     model: Optional[str] = None,
 ) -> None:
     """Emite un evento ``llm_call`` con todos los atributos estándar.
-
-    El evento se cuelga del span actualmente activo (``parent_span_id``)
-    sin modificar el ContextVar, de modo que no afecta al anidamiento de
-    spans dentro del nodo decorado por :func:`traced_node`.
-
-    Si el subsistema está apagado, la función es un no-op rápido.
     """
     if not is_enabled():
         return

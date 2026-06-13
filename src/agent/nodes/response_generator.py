@@ -13,16 +13,7 @@ from src.observability import emit_llm_call
 
 
 def generar_respuesta_node(state: AgentState) -> dict:
-    """Sintetiza la respuesta final sin emitir nuevas tool calls.
-
-    Se activa cuando razonador responde directamente, cuando gestionar_error
-    detecta un fallo crítico, o cuando el ciclo RAG ha terminado y el razonador
-    necesita entregar el resultado al usuario.
-
-    Llama al LLM sin herramientas enlazadas para garantizar que la respuesta
-    sea texto plano y no desencadene otro ciclo de ejecución.
-    Resetea `error_count` y `error_info` en la salida limpia.
-    """
+    """Sintetiza la respuesta final sin emitir nuevas tool calls."""
     csv_path = state.get("csv_path")
     csv_metadata = state.get("csv_metadata")
 

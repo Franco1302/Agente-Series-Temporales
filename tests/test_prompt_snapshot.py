@@ -1,15 +1,9 @@
 """Snapshot del prompt por defecto + sanity checks de las variantes de ablación.
 
-Tarea 1 del brief del Cap. 6: tras parametrizar ``build_system_prompt`` con
-``PromptAblation``, el prompt **por defecto** (todos los flags a True) debe ser
-byte-exact al que producía el código antes del refactor. Si alguien toca el
-texto de cualquier bloque inadvertidamente, este test cae con un diff claro
-indicando dónde.
-
-Los snapshots viven en ``tests/fixtures/prompt_snapshots/``. Para regenerar uno
-basta con borrar el fichero y dejar que el test lo escriba con la nueva firma
-(tras confirmar manualmente que el cambio es intencional, los fija quien edita
-el prompt).
+El prompt por defecto (todos los flags a True) debe ser byte-exact al previo al
+refactor; si alguien cambia el texto de cualquier bloque, el test cae con un diff.
+Los snapshots viven en tests/fixtures/prompt_snapshots/; para regenerar uno, bórralo
+y deja que el test lo reescriba tras confirmar que el cambio es intencional.
 """
 
 from __future__ import annotations
@@ -20,13 +14,12 @@ import pytest
 
 from src.agent.prompts.system_prompts import (
     FEWSHOT_EXAMPLES,
-    PromptAblation,
     RULE_NO_INVENT,
     RULE_THEORY_TOOL_BEHAVIOR,
     RULE_THEORY_TOOL_REGLAS,
+    PromptAblation,
     build_system_prompt,
 )
-
 
 SNAPSHOTS = Path(__file__).parent / "fixtures" / "prompt_snapshots"
 
@@ -67,7 +60,7 @@ def test_default_prompt_matches_snapshot(snapshot_name: str, kwargs: dict) -> No
 
 
 def test_explicit_default_ablation_equals_implicit() -> None:
-    """Pasar ``PromptAblation()`` explícitamente o ``None`` produce el mismo prompt."""
+    """Pasar PromptAblation() explícitamente o None produce el mismo prompt."""
     p_implicit = build_system_prompt()
     p_explicit = build_system_prompt(ablation=PromptAblation())
     assert p_implicit == p_explicit
@@ -77,7 +70,7 @@ def test_explicit_default_ablation_equals_implicit() -> None:
 
 
 def test_no_invent_off_removes_rule() -> None:
-    """Con ``include_no_invent=False`` la regla anti-invención desaparece del prompt."""
+    """Con include_no_invent=False la regla anti-invención desaparece del prompt."""
     full = build_system_prompt()
     ablated = build_system_prompt(ablation=PromptAblation(include_no_invent=False))
     assert RULE_NO_INVENT in full
@@ -88,8 +81,7 @@ def test_no_invent_off_removes_rule() -> None:
 
 
 def test_theory_tool_off_removes_both_directives_and_swaps_tool9() -> None:
-    """Con ``include_theory_tool=False`` desaparecen las dos directivas y la
-    descripción de la tool nº 9 se sustituye por la variante neutra."""
+    """Con include_theory_tool=False desaparecen las dos directivas y la descripción de la tool nº 9 se sustituye por la variante neutra."""
     full = build_system_prompt()
     ablated = build_system_prompt(ablation=PromptAblation(include_theory_tool=False))
 
@@ -98,19 +90,16 @@ def test_theory_tool_off_removes_both_directives_and_swaps_tool9() -> None:
     assert RULE_THEORY_TOOL_BEHAVIOR not in ablated
     assert RULE_THEORY_TOOL_REGLAS not in ablated
 
-    # La descripción enfática ("SIEMPRE para preguntas teóricas... No respondas
-    # de memoria") se sustituye por la neutra ("Recupera contexto teórico...").
+    # La descripción enfática ("SIEMPRE para preguntas teóricas...") se sustituye por la neutra ("Recupera contexto teórico...").
     assert "SIEMPRE para preguntas teóricas" in full
     assert "SIEMPRE para preguntas teóricas" not in ablated
     assert "Recupera contexto teórico" in ablated
-    # La tool sigue listada en algún punto del prompt (es necesaria para que el
-    # binding del LLM la encuentre cuando hace falta).
+    # La tool sigue listada en el prompt (necesaria para que el binding del LLM la encuentre).
     assert "consultar_teoria" in ablated
 
 
 def test_fewshot_off_removes_examples_block() -> None:
-    """Con ``include_fewshot=False`` los dos ejemplos desaparecen del bloque
-    EXPLICACIÓN DE RESULTADOS, pero la cabecera y las etiquetas se mantienen."""
+    """Con include_fewshot=False los dos ejemplos desaparecen del bloque EXPLICACIÓN DE RESULTADOS, pero la cabecera y las etiquetas se mantienen."""
     full = build_system_prompt(tool_result_to_explain="detect_drift")
     ablated = build_system_prompt(
         tool_result_to_explain="detect_drift",
@@ -133,8 +122,7 @@ def test_all_off_still_produces_valid_prompt() -> None:
             include_fewshot=False,
         ),
     )
-    # Estructura mínima: rol, comportamiento, herramientas, bloque explicar y
-    # contexto de fichero ("ninguno"). No debe contener ninguna de las reglas.
+    # Estructura mínima (rol, comportamiento, herramientas, explicar, fichero "ninguno") sin ninguna de las reglas.
     for header in ("IDIOMA:", "COMPORTAMIENTO:", "HERRAMIENTAS:",
                    "EXPLICACIÓN DE RESULTADOS:", "FICHERO ACTIVO: ninguno."):
         assert header in ablated, f"Falta cabecera '{header}' en el prompt ablacionado"

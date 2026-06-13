@@ -1,9 +1,8 @@
 """Tests del nodo recuperar_contexto.
 
-Garantizan la invariante de la Fase C: la tool call de ``consultar_teoria``
-NUNCA queda huérfana. El nodo devuelve siempre un ``ToolMessage`` (camino feliz,
-resultado "Error: …" del RAG, o excepción inesperada), nunca un ``error_info``
-que la arista incondicional ``recuperar_contexto → razonador`` ignoraría.
+Garantizan la invariante de la Fase C: la tool call de consultar_teoria nunca queda
+huérfana. El nodo devuelve siempre un ToolMessage (camino feliz, "Error: …" del RAG o
+excepción inesperada), nunca un error_info que la arista incondicional ignoraría.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ def _state_with_rag_call(query: str = "¿qué es el PSI?", call_id: str = "call_
 
 
 class _FakeTool:
-    """Doble de ``consultar_teoria`` que devuelve un valor fijo o lanza."""
+    """Doble de consultar_teoria que devuelve un valor fijo o lanza."""
 
     def __init__(self, *, returns=None, raises=None):
         self._returns = returns

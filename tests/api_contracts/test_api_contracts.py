@@ -1,12 +1,10 @@
 """Tests de contrato de la API MCP con scoring ponderado.
 
-Cada test asegura un contrato concreto de una tool MCP contra el backend real.
-Los pesos definidos con @pytest.mark.weight() agregan a un scorecard final
-escrito en tests/results/api_scorecard.csv por el hook pytest_sessionfinish.
+Cada test asegura un contrato de una tool MCP contra el backend real; los pesos de
+@pytest.mark.weight() agregan a tests/results/api_scorecard.csv (hook sessionfinish).
 
 Ejecutar:
     PYTHONPATH=. pytest -m integration tests/api_contracts -v
-    cat tests/results/api_scorecard.csv
 """
 
 from __future__ import annotations
@@ -86,11 +84,7 @@ async def test_drift_ks_detects_on_trend(trend_csv_path: str):
 
 @pytest.mark.weight(15)
 async def test_drift_ks_no_drift_on_stable(stable_csv_path: str):
-    """Una serie Normal(0,1) estable no debe producir drift con KS umbral 0.01.
-
-    Usamos umbral 0.01 para evitar falsos positivos del 5% que se obtienen con
-    el umbral típico de 0.05 sobre datos puramente aleatorios.
-    """
+    """Una serie Normal(0,1) estable no debe producir drift con KS umbral 0.01 (evita los falsos positivos del 5% del umbral típico 0.05 sobre datos aleatorios)."""
     out = await detect_drift(
         file_path=stable_csv_path,
         index_column="Indice",

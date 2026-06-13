@@ -1,9 +1,8 @@
 """Fixtures, hooks y scorecard para los tests de contrato de la API MCP.
 
-Estos tests son @pytest.mark.integration: requieren la API real corriendo en
-DRIFT_API_URL. Sobreescriben el autouse de tests/conftest.py para usar un
-workspace compartido por toda la sesión y poder reutilizar CSVs generados por
-las tools de generación (generate_synthetic_*) como input de los tests downstream.
+Son @pytest.mark.integration (requieren la API real en DRIFT_API_URL). Sobrescriben el
+autouse de tests/conftest.py para usar un workspace de sesión y reutilizar los CSV
+generados por las tools como input de los tests downstream.
 """
 
 from __future__ import annotations
@@ -17,7 +16,6 @@ from typing import Any
 
 import httpx
 import pytest
-
 
 _API_URL = os.getenv("DRIFT_API_URL", "http://localhost:8017").rstrip("/")
 
@@ -134,8 +132,7 @@ def ensure_api_alive() -> None:
 
 @pytest.fixture(scope="session")
 def trend_csv_path(session_workspace: Path) -> str:
-    """Serie con tendencia lineal — primera mitad y segunda mitad tienen
-    medias muy distintas, por lo que KS debe detectar drift."""
+    """Serie con tendencia lineal: las dos mitades tienen medias muy distintas, así que KS debe detectar drift."""
     from mcp_server.tools.synthetic import generate_synthetic_trend
 
     result = asyncio.run(

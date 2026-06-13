@@ -3,16 +3,6 @@
 El prompt se compone de cuatro bloques (rol, comportamiento, herramientas y
 contexto de fichero) más un bloque opcional para el formato RESULTADO /
 INTERPRETACIÓN / SIGUIENTE PASO en herramientas analíticas.
-
-Tres fragmentos del prompt son ablacionables individualmente para el estudio
-del Capítulo 6 (ver `scripts/ablation_eval.py`):
-
-  * ``RULE_NO_INVENT``      — regla anti-invención de parámetros.
-  * ``RULE_THEORY_TOOL``    — obliga a usar ``consultar_teoria`` para teoría.
-  * ``FEWSHOT_EXAMPLES``    — dos ejemplos (drift, forecast) del bloque explicar.
-
-Por defecto las tres están activas y el prompt es byte-exact al de antes del
-refactor (ver ``tests/test_prompt_snapshot.py``).
 """
 
 from __future__ import annotations
@@ -93,8 +83,7 @@ medio de unas 4 unidades, un margen moderado.
 empieza a crecer en producción."""
 
 
-# ── Bloques fijos del prompt ────────────────────────────────────────────────
-
+# Bloques fijos del prompt 
 # Subviñetas no ablacionables del bloque de comportamiento.
 _BEHAVIOR_INTRO = """\
 COMPORTAMIENTO:
@@ -120,8 +109,7 @@ _BEHAVIOR_FALLBACK = """\
 - Si la petición del usuario es genuinamente ambigua y no encaja con ninguna
   herramienta, pide aclaración en texto plano sin emitir tool call."""
 
-# ── Descripciones de las tools 1..8 (generación dinámica) ──────────────────
-#
+# Descripciones de las tools 1..8 (generación dinámica)
 # Este bloque se genera leyendo `tool.description` y `tool.args_schema` de cada
 # herramienta cargada vía MCP. Las piezas que el schema no expresa (orden de
 # presentación, triggers, notas extra, qué enum mostrar inline) viven en el
@@ -204,8 +192,7 @@ mediante el panel lateral antes de continuar.
 # (`consultar_teoria` queda fuera: sus respuestas son teóricas, en prosa).
 
 
-# ── Configuración de ablación ───────────────────────────────────────────────
-
+# Configuración de ablación 
 
 @dataclass(frozen=True)
 class PromptAblation:
@@ -234,8 +221,7 @@ class PromptAblation:
 _DEFAULT_ABLATION = PromptAblation()
 
 
-# ── Constructores de bloques que dependen de la ablación ────────────────────
-
+# Constructores de bloques que dependen de la ablación 
 
 def _build_behavior_block(ablation: PromptAblation) -> str:
     """Compone el bloque COMPORTAMIENTO según los flags de ablación.
